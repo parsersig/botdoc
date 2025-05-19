@@ -155,7 +155,7 @@ function getMainKeyboard($isAdmin = false) {
     $keyboard = [
         ['💰 Заработать', '💳 Баланс'],
         ['🏆 Топ', '👥 Рефералы'],
-        ['mtx', 'mtw']
+        [' mtx', ' mtw']
     ];
 
     if ($isAdmin) {
@@ -330,7 +330,15 @@ function handleCallback($callbackQuery) {
         $userId = str_replace('user_', '', $data);
         $user = $db->querySingle("SELECT * FROM users WHERE user_id=$userId", true);
 
-        $keyboard = getUserActionsKeyboard($userId);
+        $keyboard = ['inline_keyboard' => [[
+            ['text' => '✅ Разблокировать', 'callback_data' => "unblock_$userId"],
+            ['text' => '🚫 Заблокировать', 'callback_data' => "block_$userId"]
+        ],[
+            ['text' => '📨 Написать', 'callback_data' => "write_$userId"],
+            ['text' => '🗑 Удалить', 'callback_data' => "delete_$userId"]
+        ],[
+            ['text' => '⬅️ Назад', 'callback_data' => 'admin_users']
+        ]]];
 
         $message = "👤 <b>Профиль пользователя</b>\n";
         $message .= "ID: <b>{$user['user_id']}</b>\n";
@@ -371,7 +379,6 @@ function handleCommand($chatId, $text) {
     switch ($text) {
         case '💰 Заработать':
             $cooldown = 60;
-            $reward = 10;
             $row = $db->querySingle("SELECT last_earn FROM users WHERE user_id=$chatId", true);
             $remaining = $cooldown - (time() - $row['last_earn']);
 
