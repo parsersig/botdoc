@@ -152,11 +152,11 @@ function getSubscriptionKeyboard() {
 }
 
 function getMainKeyboard($isAdmin = false) {
-    $keyboard = [
-        ['💰 Заработать', '💳 Баланс'],
-        ['🏆 Топ', '👥 Рефералы'],
-        [' mtx', ' mtw']
-    ];
+   $keyboard = [
+    ['💰 Заработать', '💳 Баланс'],
+    ['🏆 Топ', '👥 Рефералы'],
+    [' mtx', ' mtw']
+];
 
     if ($isAdmin) {
         $keyboard[] = ['⚙️ Админ'];
