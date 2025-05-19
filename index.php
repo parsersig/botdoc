@@ -7,16 +7,23 @@
 // 🔧 Конфигурация и инициализация
 // -----------------------------
 
+// Handle non-Telegram requests (e.g., health checks, browser access)
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty(file_get_contents("php://input"))) {
+    http_response_code(200);
+    echo "This is a Telegram webhook endpoint.";
+    exit;
+}
+
 // Включение логов ошибок
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
-ini_set('error_log', __DIR__.'/error.log');
+ini_set('error_log', '/tmp/error.log');
 
 // Константы
-define('USERS_FILE', __DIR__.'/users.json');
-define('ERROR_LOG', __DIR__.'/error.log');
-define('REQUEST_LOG', __DIR__.'/request.log');
+define('USERS_FILE', '/tmp/users.json');
+define('ERROR_LOG', '/tmp/error.log');
+define('REQUEST_LOG', '/tmp/request.log');
 define('WEBHOOK_URL', 'https://'.($_SERVER['HTTP_HOST'] ?? 'localhost'));
 
 // Создание файлов если их нет
@@ -47,7 +54,7 @@ require_once __DIR__.'/config.php';
 // Проверка обязательных констант
 foreach (['TELEGRAM_BOT_TOKEN', 'ADMIN_ID', 'BOT_USERNAME'] as $const) {
     if (!defined($const) || empty(constant($const))) {
-        logMessage("Critical: Missing $const");
+        logMessage("Critical: Missing or empty $const in config.php");
         http_response_code(500);
         die("Configuration error");
     }
@@ -66,12 +73,21 @@ $channelId = defined('CHANNEL_ID') ? CHANNEL_ID : null;
 
 function loadUsers() {
     $data = file_exists(USERS_FILE) ? file_get_contents(USERS_FILE) : '[]';
-    return json_decode($data, true) ?: [];
+    $users = json_decode($data, true);
+    if ($users === null) {
+        logMessage("Error: Failed to decode users.json");
+        return [];
+    }
+    return $users;
 }
 
 function saveUsers($users) {
-    file_put_contents(USERS_FILE, json_encode($users, JSON_PRETTY_PRINT));
+    if (!file_put_contents(USERS_FILE, json_encode($users, JSON_PRETTY_PRINT))) {
+        logMessage("Error: Failed to write to users.json");
+        return false;
+    }
     chmod(USERS_FILE, 0666);
+    return true;
 }
 
 function apiRequest($method, $params = []) {
@@ -95,11 +111,17 @@ function apiRequest($method, $params = []) {
     curl_close($ch);
     
     if ($error || $httpCode != 200) {
-        logMessage("API Error: $method - ".($error ?: "HTTP $httpCode"));
+        logMessage("API Error: $method - HTTP $httpCode - ".($error ?: "No CURL error"));
         return false;
     }
     
-    return json_decode($response, true);
+    $result = json_decode($response, true);
+    if (!$result || !isset($result['ok']) || !$result['ok']) {
+        logMessage("API Error: $method - Response: ".json_encode($result));
+        return false;
+    }
+    
+    return $result;
 }
 
 function sendMessage($chatId, $text, $keyboard = null) {
@@ -163,12 +185,12 @@ function getBotStats() {
     
     foreach ($users as $user) {
         $stats['total']++;
-        $stats['balance'] += $user['balance'];
-        $stats['referrals'] += $user['referrals'];
-        if (!$user['blocked']) $stats['active']++;
+        $stats['balance'] += $user['balance'] ?? 0;
+        $stats['referrals'] += $user['referrals'] ?? 0;
+        if (!isset($user['blocked']) || !$user['blocked']) $stats['active']++;
     }
     
-    uasort($users, fn($a, $b) => $b['balance'] <=> $a['balance']);
+    uasort($users, fn($a, $b) => ($b['balance'] ?? 0) <=> ($a['balance'] ?? 0));
     $topUsers = array_slice($users, 0, 5, true);
     
     $message = "📊 <b>Статистика бота</b>\n\n";
@@ -180,8 +202,10 @@ function getBotStats() {
     
     $i = 1;
     foreach ($topUsers as $id => $user) {
-        $status = $user['blocked'] ? '🚫' : '✅';
-        $message .= "$i. ID $id: <b>{$user['balance']}</b> (Реф: {$user['referrals']}) $status\n";
+        $status = (isset($user['blocked']) && $user['blocked']) ? '🚫' : '✅';
+        $balance = $user['balance'] ?? 0;
+        $referrals = $user['referrals'] ?? 0;
+        $message .= "$i. ID $id: <b>$balance</b> (Реф: $referrals) $status\n";
         $i++;
     }
     
@@ -194,15 +218,17 @@ function getBotStats() {
 // -----------------------------
 
 function handleStart($chatId, $text, &$users) {
+    global $botUsername;
+    
     // Обработка реферальной ссылки
     $refCode = trim(str_replace('/start', '', $text));
     
     if ($refCode && !isset($users[$chatId]['referred_by'])) {
         foreach ($users as $id => $user) {
-            if ($user['ref_code'] === $refCode && $id != $chatId) {
+            if (isset($user['ref_code']) && $user['ref_code'] === $refCode && $id != $chatId) {
                 $users[$chatId]['referred_by'] = $id;
-                $users[$id]['referrals']++;
-                $users[$id]['balance'] += 50;
+                $users[$id]['referrals'] = ($users[$id]['referrals'] ?? 0) + 1;
+                $users[$id]['balance'] = ($users[$id]['balance'] ?? 0) + 50;
                 sendMessage($id, "🎉 Новый реферал! +50 баллов.");
                 break;
             }
@@ -217,7 +243,7 @@ function handleStart($chatId, $text, &$users) {
     $message .= "<code>$refLink</code>\n\n";
     $message .= "Используйте кнопки ниже для навигации!";
     
-    sendMessage($chatId, $message, getMainKeyboard($chatId == $adminId));
+    sendMessage($chatId, $message, getMainKeyboard($chatId == $GLOBALS['adminId']));
 }
 
 function handleEarn($chatId, &$users) {
@@ -232,7 +258,7 @@ function handleEarn($chatId, &$users) {
         return;
     }
     
-    $users[$chatId]['balance'] += $reward;
+    $users[$chatId]['balance'] = ($users[$chatId]['balance'] ?? 0) + $reward;
     $users[$chatId]['last_earn'] = time();
     saveUsers($users);
     
@@ -240,10 +266,12 @@ function handleEarn($chatId, &$users) {
 }
 
 function handleWithdraw($chatId, &$users) {
+    global $adminId;
+    
     $minAmount = 100;
     
-    if ($users[$chatId]['balance'] < $minAmount) {
-        $needed = $minAmount - $users[$chatId]['balance'];
+    if (($users[$chatId]['balance'] ?? 0) < $minAmount) {
+        $needed = $minAmount - ($users[$chatId]['balance'] ?? 0);
         sendMessage($chatId, "❌ Минимальная сумма вывода: $minAmount баллов\nВам не хватает: $needed баллов");
         return;
     }
@@ -271,15 +299,11 @@ function handleWithdraw($chatId, &$users) {
 $content = file_get_contents("php://input");
 logMessage("Incoming update: $content", REQUEST_LOG);
 
-if (empty($content)) {
-    logMessage("Empty request received");
-    die("OK");
-}
-
 $update = json_decode($content, true);
 if (!$update) {
     logMessage("Invalid JSON received");
-    die("OK");
+    echo "OK";
+    exit;
 }
 
 try {
@@ -288,8 +312,14 @@ try {
     // Обработка сообщения
     if (isset($update['message'])) {
         $message = $update['message'];
-        $chatId = $message['chat']['id'];
+        $chatId = $message['chat']['id'] ?? null;
         $text = trim($message['text'] ?? '');
+        
+        if (!$chatId) {
+            logMessage("Error: No chat ID in message");
+            echo "OK";
+            exit;
+        }
         
         // Инициализация нового пользователя
         if (!isset($users[$chatId])) {
@@ -306,9 +336,10 @@ try {
         }
         
         // Проверка блокировки
-        if ($users[$chatId]['blocked']) {
+        if (isset($users[$chatId]['blocked']) && $users[$chatId]['blocked']) {
             sendMessage($chatId, "🚫 Вы заблокированы администратором.");
-            die("OK");
+            echo "OK";
+            exit;
         }
         
         // Обработка команд
@@ -355,7 +386,6 @@ try {
         elseif ($text === '🔙 Назад' && $chatId == $adminId) {
             sendMessage($chatId, "Главное меню", getMainKeyboard(true));
         }
-        // Админские команды
         elseif ($chatId == $adminId && strpos($text, '/send ') === 0) {
             $parts = explode(' ', $text, 3);
             if (count($parts) === 3) {
@@ -385,7 +415,7 @@ try {
     saveUsers($users);
     
 } catch (Exception $e) {
-    logMessage("Error: ".$e->getMessage());
+    logMessage("Error: ".$e->getMessage()." in ".$e->getFile()." on line ".$e->getLine());
     http_response_code(500);
 }
 
