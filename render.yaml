@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: botdoc
+    runtime: docker
+    env: docker
+    build:
+      dockerfile: Dockerfile
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: ${TELEGRAM_BOT_TOKEN}
+      - key: ADMIN_ID
+        value: ${ADMIN_ID}
+      - key: BOT_USERNAME
+        value: ${BOT_USERNAME}
+      - key: CHANNEL_ID
+        value: ${CHANNEL_ID}
+    port: 80
