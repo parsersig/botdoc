@@ -2,9 +2,6 @@
 // =============================================
 // 🚀 Telegram Bot Webhook Handler for Render.com
 // =============================================
-// -----------------------------
-// 🔧 Конфигурация и инициализация
-// -----------------------------
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty(file_get_contents("php://input"))) {
     http_response_code(200);
     echo "This is a Telegram webhook endpoint.";
@@ -18,16 +15,15 @@ ini_set('error_log', '/tmp/error.log');
 
 // Константы
 define('DB_FILE', '/tmp/bot_database.db');
-define('CHANNEL_ID', '@your_channel'); // Замените на ваш реальный канал
+define('CHANNEL_ID', -1002543728373); // Ваш приватный канал
 define('WEBHOOK_URL', 'https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
-define('MIN_WITHDRAW', 100); // Минимальная сумма вывода
 
 // Переменные окружения
 $botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
 $adminId = getenv('ADMIN_ID') ?: '';
 $botUsername = getenv('BOT_USERNAME') ?: 'CRYPTOCAP_ROBOT';
 
-foreach (['TELEGRAM_BOT_TOKEN' => $botToken, 'ADMIN_ID' => $adminId, 'BOT_USERNAME' => $botUsername] as $key => $value) {
+foreach (['TELEGRAM_BOT_TOKEN'=>$botToken, 'ADMIN_ID'=>$adminId, 'BOT_USERNAME'=>$botUsername] as $key=>$value) {
     if (empty($value)) {
         logMessage("Critical: Missing or empty $key environment variable");
         http_response_code(500);
@@ -35,7 +31,7 @@ foreach (['TELEGRAM_BOT_TOKEN' => $botToken, 'ADMIN_ID' => $adminId, 'BOT_USERNA
     }
 }
 
-$apiUrl = "https://api.telegram.org/bot$botToken/";
+$apiUrl = "https://api.telegram.org/bot $botToken/";
 
 // Инициализация БД
 try {
@@ -47,7 +43,6 @@ try {
         referrals INTEGER DEFAULT 0,
         ref_code TEXT,
         referred_by INTEGER,
-        subscribed BOOLEAN DEFAULT 0,
         blocked BOOLEAN DEFAULT 0,
         last_earn INTEGER DEFAULT 0,
         joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -135,7 +130,7 @@ function editMessage($chatId, $msgId, $text, $keyboard = null) {
 
 function isSubscribed($userId) {
     global $botToken;
-    $response = file_get_contents("https://api.telegram.org/bot$botToken/getChatMember?chat_id=" . CHANNEL_ID . "&user_id=$userId");
+    $response = file_get_contents("https://api.telegram.org/bot $botToken/getChatMember?chat_id=" . CHANNEL_ID . "&user_id=$userId");
     $data = json_decode($response, true);
     return in_array($data['result']['status'] ?? '', ['member', 'administrator', 'creator']);
 }
@@ -146,7 +141,7 @@ function isSubscribed($userId) {
 function getSubscriptionKeyboard() {
     return [
         'inline_keyboard' => [[
-            ['text' => '📢 Наш канал', 'url' => 'https://t.me/' . -1002543728373, '@CRYPTOCAP_ROBOT')],
+            ['text' => '📢 Наш канал', 'url' => 'https://t.me/c/ ' . ltrim(CHANNEL_ID, '-')],
             ['text' => '✅ Я подписался', 'callback_data' => 'check_subscription']
         ]]
     ];
@@ -156,7 +151,7 @@ function getMainKeyboard($isAdmin = false) {
     $keyboard = [
         ['💰 Заработать', '💳 Баланс'],
         ['🏆 Топ', '👥 Рефералы'],
-        ['/mtx', '/mtw']
+        [' mtx', ' mtw']
     ];
 
     if ($isAdmin) {
@@ -170,7 +165,6 @@ function getAdminKeyboard() {
     return ['inline_keyboard' => [
         [['text' => '📊 Статистика', 'callback_data' => 'admin_stats']],
         [['text' => '👤 Участники', 'callback_data' => 'admin_users']],
-        [['text' => '✉️ Рассылка', 'callback_data' => 'admin_broadcast']],
         [['text' => '⬅️ Назад', 'callback_data' => 'admin_back']]
     ]];
 }
@@ -239,17 +233,19 @@ function getBotStats() {
 // 📨 Обработка команд
 // -----------------------------
 function handleStart($chatId, $text) {
-    global $db, $botUsername;
-    $refCode = trim(str_replace('/start', '', $text));
+    global $db, $botUsername, $adminId;
 
+    // Реферальная система
+    $refCode = trim(str_replace('/start', '', $text));
     if ($refCode && !$db->querySingle("SELECT referred_by FROM users WHERE user_id=$chatId")) {
         $referrer = $db->querySingle("SELECT user_id FROM users WHERE ref_code='$refCode'");
         if ($referrer && $referrer != $chatId) {
-            $db->exec("UPDATE users SET referrals=referrals+1, balance=balance+50 WHERE user_id=$referrer");
+            $db->exec("UPDATE users SET referrals=referrals+1, balance=balance+50 WHERE user_id={$referrer}");
             sendMessage($referrer, "🎉 Новый реферал! +50 баллов.");
         }
     }
 
+    // Проверка подписки
     if (!isSubscribed($chatId)) {
         $message = "👋 Добро пожаловать!\n";
         $message .= "📢 Подпишитесь на наш канал, чтобы продолжить:";
@@ -257,8 +253,9 @@ function handleStart($chatId, $text) {
         return;
     }
 
+    // Основное меню
     $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-    $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
+    $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
 
     $message = "👋 Добро пожаловать в @{$botUsername}!\n";
     $message .= "💰 Зарабатывайте баллы и выводите их\n";
@@ -267,7 +264,7 @@ function handleStart($chatId, $text) {
 }
 
 function handleCallback($callbackQuery) {
-    global $db, $adminId;
+    global $db, $adminId, $botUsername;
 
     $chatId = $callbackQuery['message']['chat']['id'];
     $msgId = $callbackQuery['message']['message_id'];
@@ -276,9 +273,9 @@ function handleCallback($callbackQuery) {
     if ($data === 'check_subscription') {
         if (isSubscribed($chatId)) {
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            $refLink = "https://t.me/" . $GLOBALS['botUsername'] . "?start={$user['ref_code']}";
+            $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
             $message = "✅ Спасибо за подписку!\nТеперь вы можете пользоваться ботом.\nРеферальная ссылка: <code>$refLink</code>";
-            sendMessage($chatId, $message, getMainKeyboard($chatId == $GLOBALS['adminId']));
+            sendMessage($chatId, $message, getMainKeyboard($chatId == $adminId));
         } else {
             sendMessage($chatId, "❌ Вы ещё не подписаны. Нажмите кнопку ещё раз после подписки.", getSubscriptionKeyboard());
         }
@@ -287,9 +284,11 @@ function handleCallback($callbackQuery) {
     if (strpos($data, 'approve_') === 0) {
         $userId = str_replace('approve_', '', $data);
         $user = $db->querySingle("SELECT * FROM users WHERE user_id=$userId", true);
+        
         if ($chatId == $adminId && $user) {
             $amount = $user['balance'];
             $db->exec("UPDATE users SET balance=0 WHERE user_id=$userId");
+            
             editMessage($chatId, $msgId, "✅ Заявка одобрена\nСумма: $amount баллов\nПользователь: $userId");
             sendMessage($userId, "🎉 Ваша заявка на вывод $amount баллов одобрена!");
         }
@@ -298,6 +297,7 @@ function handleCallback($callbackQuery) {
     if (strpos($data, 'reject_') === 0) {
         $userId = str_replace('reject_', '', $data);
         $user = $db->querySingle("SELECT * FROM users WHERE user_id=$userId", true);
+        
         if ($chatId == $adminId && $user) {
             $amount = $user['balance'];
             editMessage($chatId, $msgId, "❌ Заявка отклонена\nСумма: $amount баллов\nПользователь: $userId");
@@ -389,13 +389,13 @@ function handleCommand($chatId, $text) {
             sendMessage($chatId, "✅ +10 баллов! Текущий баланс: $newBalance");
             break;
 
-        case '/mtx':
+        case ' mtx':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
             $balance = $user['balance'];
 
-            if ($balance < MIN_WITHDRAW) {
-                $needed = MIN_WITHDRAW - $balance;
-                sendMessage($chatId, "❌ Минимальная сумма вывода: " . MIN_WITHDRAW . " баллов\nВам не хватает: $needed баллов");
+            if ($balance < 100) {
+                $needed = 100 - $balance;
+                sendMessage($chatId, "❌ Минимальная сумма вывода: 100 баллов\nВам не хватает: $needed баллов");
                 break;
             }
 
@@ -410,11 +410,11 @@ function handleCommand($chatId, $text) {
             sendMessage($chatId, "✅ Запрос на вывод $balance баллов отправлен администратору.");
             break;
 
-        case '/mtw':
+        case ' mtw':
             $msg = "ℹ️ <b>Помощь</b>\n";
             $msg .= "💰 <b>Заработать</b> — получайте 10 баллов каждую минуту\n";
             $msg .= "👥 <b>Рефералы</b> — приглашайте друзей и получайте бонусы\n";
-            $msg .= "/mtx <b>Вывод</b> — минимальная сумма 100 баллов\n";
+            $msg .= "mtx <b>Вывод</b> — минимальная сумма 100 баллов\n";
             $msg .= "Используйте кнопки меню для навигации!";
             sendMessage($chatId, $msg);
             break;
@@ -425,7 +425,8 @@ function handleCommand($chatId, $text) {
 
         case '👥 Рефералы':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
+            $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
+
             $msg = "👥 <b>Реферальная система</b>\n";
             $msg .= "Ваш код: <code>{$user['ref_code']}</code>\n";
             $msg .= "Приглашено: <b>{$user['referrals']}</b>\n";
@@ -476,9 +477,9 @@ try {
             $username = $message['from']['username'] ?? null;
             $refCode = substr(md5($chatId . time()), 0, 8);
             $db->exec("INSERT INTO users (
-                user_id, username, balance, referrals, ref_code, referred_by, subscribed, blocked, last_earn
+                user_id, username, balance, referrals, ref_code, referred_by, blocked, last_earn
             ) VALUES (
-                $chatId, '$username', 0, 0, '$refCode', NULL, 0, 0, 0
+                $chatId, '$username', 0, 0, '$refCode', NULL, 0, 0
             )");
         }
 
@@ -496,9 +497,9 @@ try {
             handleStart($chatId, $text);
         } elseif ($text === '💰 Заработать') {
             handleCommand($chatId, $text);
-        } elseif ($text === '/mtx') {
+        } elseif ($text === ' mtx') {
             handleCommand($chatId, $text);
-        } elseif ($text === '/mtw') {
+        } elseif ($text === ' mtw') {
             handleCommand($chatId, $text);
         } elseif ($text === '🏆 Топ') {
             handleCommand($chatId, $text);
