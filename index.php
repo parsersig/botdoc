@@ -1,7 +1,8 @@
+<?php
 // =============================================
 // 🚀 Telegram Bot Webhook Handler for Render.com
 // =============================================
-// Version 1.4.0: Оптимизированная версия с исправленными инлайн-кнопками
+// Version 1.5.0: Оптимизированная версия с HTML-форматированием и улучшенной настройкой вебхука
 
 // --- Configuration ---
 define('DEFAULT_DB_FILE', '/tmp/bot_database.db');
@@ -22,7 +23,7 @@ if (isset($_SERVER['REQUEST_URI']) && $_SERVER['REQUEST_URI'] === '/health') {
     echo json_encode([
         'status' => 'ok',
         'time' => date('Y-m-d H:i:s'),
-        'version' => '1.4.0'
+        'version' => '1.5.0'
     ]);
     exit;
 }
@@ -59,6 +60,15 @@ if (empty($botToken) || empty($adminId)) {
 // API URL
 $apiUrl = "https://api.telegram.org/bot$botToken";
 
+// -----------------------------
+// 🛠️ Helper Functions
+// -----------------------------
+function bot_log($message, $level = "INFO") {
+    global $errorLogPath;
+    $timestamp = date('Y-m-d H:i:s');
+    file_put_contents($errorLogPath, "[$timestamp] [$level] $message\n", FILE_APPEND);
+}
+
 // Initialize database
 try {
     $dataDir = dirname($dbFilePath);
@@ -85,7 +95,7 @@ try {
         joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
 } catch (Exception $e) {
-    file_put_contents($errorLogPath, "[".date('Y-m-d H:i:s')."] DB Error: ".$e->getMessage()."\n", FILE_APPEND);
+    bot_log("DB Error: ".$e->getMessage(), "ERROR");
     http_response_code(500);
     die("Database error: " . $e->getMessage());
 }
@@ -94,13 +104,36 @@ try {
 if (isset($_GET['setwebhook']) && $_GET['setwebhook'] === '1') {
     $scriptPath = $_SERVER['PHP_SELF'];
     $webhookUrlToSet = rtrim($webhookBaseUrl, '/') . $scriptPath;
-    $setWebhookUrl = "$apiUrl/setWebhook?url=" . urlencode($webhookUrlToSet);
-    $result = @file_get_contents($setWebhookUrl);
-    $logEntry = "[".date('Y-m-d H:i:s')."] Webhook setup attempt to $webhookUrlToSet. Result: $result\n";
+    
+    // Добавляем логирование для отладки
+    bot_log("Attempting to set webhook to: $webhookUrlToSet", "INFO");
+    
+    // Сначала удаляем текущий вебхук, чтобы избежать конфликтов
+    $deleteResult = @file_get_contents("$apiUrl/deleteWebhook");
+    bot_log("Delete webhook result: $deleteResult", "INFO");
+    
+    // Используем более надежный метод для установки вебхука
+    $setWebhookParams = [
+        'url' => $webhookUrlToSet,
+        'max_connections' => 40,
+        'allowed_updates' => json_encode(['message', 'callback_query'])
+    ];
+    
+    $ch = curl_init("$apiUrl/setWebhook");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $setWebhookParams);
+    $result = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    $logEntry = "[".date('Y-m-d H:i:s')."] Webhook setup attempt to $webhookUrlToSet. Result: $result, HTTP Code: $httpCode\n";
     file_put_contents($errorLogPath, $logEntry, FILE_APPEND);
+    
     echo "Webhook setup attempt. Result: " . htmlspecialchars($result);
     exit;
 }
+
 if (isset($_GET['deletewebhook']) && $_GET['deletewebhook'] === '1') {
     $result = @file_get_contents("$apiUrl/deleteWebhook");
     $logEntry = "[".date('Y-m-d H:i:s')."] Webhook delete attempt. Result: $result\n";
@@ -109,11 +142,40 @@ if (isset($_GET['deletewebhook']) && $_GET['deletewebhook'] === '1') {
     exit;
 }
 
+// Добавляем просмотр информации о вебхуке
+if (isset($_GET['webhook_info']) && $_GET['webhook_info'] === '1') {
+    $result = @file_get_contents("$apiUrl/getWebhookInfo");
+    echo "<pre>Webhook Info: " . htmlspecialchars($result) . "</pre>";
+    exit;
+}
+
+// Добавляем просмотр логов
+if (isset($_GET['logs']) && $_GET['logs'] === '1') {
+    if (file_exists($errorLogPath)) {
+        $logs = file_get_contents($errorLogPath);
+        $logs = htmlspecialchars($logs);
+        echo "<pre>$logs</pre>";
+    } else {
+        echo "Log file not found at: $errorLogPath";
+    }
+    exit;
+}
+
+// Простой тест для отправки сообщения админу
+if (isset($_GET['test_message']) && $_GET['test_message'] === '1') {
+    $testFunctionResult = testFormatting($adminId);
+    echo "Test message sent to admin. Result: " . json_encode($testFunctionResult);
+    exit;
+}
+
 // Main webhook handler
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     if (! (isset($_SERVER['REQUEST_URI']) && $_SERVER['REQUEST_URI'] === '/health') &&
         ! (isset($_GET['setwebhook']) && $_GET['setwebhook'] === '1') &&
-        ! (isset($_GET['deletewebhook']) && $_GET['deletewebhook'] === '1') ) {
+        ! (isset($_GET['deletewebhook']) && $_GET['deletewebhook'] === '1') &&
+        ! (isset($_GET['webhook_info']) && $_GET['webhook_info'] === '1') &&
+        ! (isset($_GET['logs']) && $_GET['logs'] === '1') &&
+        ! (isset($_GET['test_message']) && $_GET['test_message'] === '1')) {
         http_response_code(405);
         echo "Method Not Allowed. This endpoint expects POST requests from Telegram.";
     }
@@ -127,14 +189,8 @@ if (empty($content)) {
     exit;
 }
 
-// -----------------------------
-// 🛠️ Helper Functions
-// -----------------------------
-function bot_log($message, $level = "INFO") {
-    global $errorLogPath;
-    $timestamp = date('Y-m-d H:i:s');
-    file_put_contents($errorLogPath, "[$timestamp] [$level] $message\n", FILE_APPEND);
-}
+// Логируем входящие данные
+bot_log("Received update: " . $content, "INFO");
 
 function apiRequest($method, $params = [], $retries = 3) {
     global $apiUrl, $errorLogPath;
@@ -254,6 +310,17 @@ function isSubscribed($userId) {
         return false;
     }
     return isset($data['result']['status']) && in_array($data['result']['status'], ['member', 'administrator', 'creator']);
+}
+
+// Test function for formatting
+function testFormatting($adminId) {
+    return sendMessage($adminId, 
+        "<b>Тест жирного</b>\n" .
+        "<i>Тест курсива</i>\n" .
+        "<code>Тест моноширинного</code>\n" .
+        "<pre>Тест блока кода</pre>\n" .
+        "<a href='https://t.me/'>Тест ссылки</a>"
+    );
 }
 
 // -----------------------------
@@ -416,7 +483,7 @@ function handleStart($chatId, $userId, $text) {
                 $updateReferrerStmt = $db->prepare("UPDATE users SET referrals = referrals + 1, balance = balance + 50 WHERE user_id = :referrer_id");
                 $updateReferrerStmt->bindValue(':referrer_id', $referrer['user_id'], SQLITE3_INTEGER);
                 $updateReferrerStmt->execute();
-                sendMessage($referrer['user_id'], "🎉 Новый реферал присоединился по вашей ссылке! +50 баллов на ваш счет.");
+                sendMessage($referrer['user_id'], "🎉 Новый реферал присоединился по вашей ссылке! <b>+50 баллов</b> на ваш счет.");
                 
                 $updateUserStmt = $db->prepare("UPDATE users SET referred_by = :referrer_id WHERE user_id = :user_id");
                 $updateUserStmt->bindValue(':referrer_id', $referrer['user_id'], SQLITE3_INTEGER);
@@ -449,6 +516,11 @@ function handleStart($chatId, $userId, $text) {
     $message .= "👥 Приглашайте друзей и получайте бонусы! Ваша реферальная ссылка:\n<code>$refLink</code>\n\n";
     $message .= "👇 Используйте меню ниже для навигации.";
     sendMessage($chatId, $message, getMainMenuInlineKeyboard($userId == $adminId));
+    
+    // Для тестирования HTML-форматирования у админа
+    if ($userId == $adminId) {
+        testFormatting($adminId);
+    }
 }
 
 function handleCallback($callbackQuery) {
@@ -471,7 +543,7 @@ function handleCallback($callbackQuery) {
             $userStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
             $user = $userStmt->execute()->fetchArray(SQLITE3_ASSOC);
             $refLink = "https://t.me/$botUsername?start=" . ($user['ref_code'] ?? '');
-            $message = "✅ Спасибо за подписку!\n\nТеперь вы можете пользоваться всеми функциями бота.\n\nВаша реферальная ссылка для приглашения друзей:\n<code>$refLink</code>\n\n";
+            $message = "✅ <b>Спасибо за подписку!</b>\n\nТеперь вы можете пользоваться всеми функциями бота.\n\nВаша реферальная ссылка для приглашения друзей:\n<code>$refLink</code>\n\n";
             $message .= "👇 Вот главное меню:";
             editMessage($chatId, $msgId, $message, getMainMenuInlineKeyboard($userIsAdmin));
             answerCallbackQuery($callbackQueryId);
@@ -491,7 +563,7 @@ function handleCallback($callbackQuery) {
     
     // Проверка подписки для всех других действий
     if (!$userIsAdmin && !empty($channelId) && !isSubscribed($userId)) {
-        $text = "Пожалуйста, подпишитесь на наш канал, чтобы продолжить.";
+        $text = "Пожалуйста, <b>подпишитесь на наш канал</b>, чтобы продолжить.";
         $subKeyboard = getSubscriptionKeyboard();
         if ($subKeyboard) {
             editMessage($chatId, $msgId, $text, $subKeyboard);
@@ -508,7 +580,7 @@ function handleCallback($callbackQuery) {
         $userStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $user = $userStmt->execute()->fetchArray(SQLITE3_ASSOC);
         $refLink = "https://t.me/$botUsername?start=" . ($user['ref_code'] ?? '');
-        $message = "👋 Главное меню @$botUsername!\n\n";
+        $message = "👋 <b>Главное меню</b> @$botUsername!\n\n";
         $message .= "💰 Зарабатывайте баллы и выводите их.\n";
         $message .= "👥 Приглашайте друзей: <code>$refLink</code>\n\n";
         $message .= "👇 Используйте кнопки ниже:";
@@ -554,7 +626,7 @@ function handleCallback($callbackQuery) {
         $callbackAnswered = true;
     }
 
-       else if ($data === 'show_referrals_info') {
+    else if ($data === 'show_referrals_info') {
         $stmt = $db->prepare("SELECT ref_code, referrals FROM users WHERE user_id = :user_id");
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $user = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
@@ -584,9 +656,9 @@ function handleCallback($callbackQuery) {
             $userFrom = $callbackQuery['from'];
             $usernameFrom = isset($userFrom['username']) ? "@".htmlspecialchars($userFrom['username']) : "ID: ".$userId;
 
-            $adminMsg = "🔔 Новый запрос на вывод средств!\n\n";
+            $adminMsg = "🔔 <b>Новый запрос на вывод средств!</b>\n\n";
             $adminMsg .= "👤 Пользователь: $usernameFrom (ID: $userId)\n";
-            $adminMsg .= "💰 Сумма к выводу: $balance баллов\n";
+            $adminMsg .= "💰 Сумма к выводу: <b>$balance</b> баллов\n";
             $adminMsg .= "⏱ Время запроса: " . date('d.m.Y H:i:s');
 
             sendMessage($adminId, $adminMsg, getWithdrawKeyboard($userId));
@@ -685,9 +757,9 @@ function handleCallback($callbackQuery) {
                 $updateStmt->bindValue(':user_id', $targetUserId, SQLITE3_INTEGER);
                 $updateStmt->execute();
 
-                $adminConfirmationMsg = "✅ Заявка на вывод для ID $targetUserId (" . ($user['username'] ? "@".htmlspecialchars($user['username']) : '') . ") на $amount баллов ОДОБРЕНА.\nБаланс обнулен.";
+                $adminConfirmationMsg = "✅ Заявка на вывод для ID $targetUserId (" . ($user['username'] ? "@".htmlspecialchars($user['username']) : '') . ") на <b>$amount</b> баллов <b>ОДОБРЕНА</b>.\nБаланс обнулен.";
                 editMessage($chatId, $msgId, $adminConfirmationMsg); 
-                sendMessage($targetUserId, "🎉 Ваша заявка на вывод $amount баллов ОДОБРЕНА!");
+                sendMessage($targetUserId, "🎉 Ваша заявка на вывод <b>$amount</b> баллов <b>ОДОБРЕНА</b>!");
                 answerCallbackQuery($callbackQueryId);
                 $callbackAnswered = true;
             } else {
@@ -704,9 +776,9 @@ function handleCallback($callbackQuery) {
 
             if ($user) {
                 $amount = $user['balance']; 
-                $adminConfirmationMsg = "❌ Заявка на вывод для ID $targetUserId (" . ($user['username'] ? "@".htmlspecialchars($user['username']) : '') . ") на $amount баллов ОТКЛОНЕНА.\nБаланс НЕ изменен.";
+                $adminConfirmationMsg = "❌ Заявка на вывод для ID $targetUserId (" . ($user['username'] ? "@".htmlspecialchars($user['username']) : '') . ") на <b>$amount</b> баллов <b>ОТКЛОНЕНА</b>.\nБаланс НЕ изменен.";
                 editMessage($chatId, $msgId, $adminConfirmationMsg); 
-                sendMessage($targetUserId, "⚠️ Ваша заявка на вывод $amount баллов ОТКЛОНЕНА. Средства на балансе.");
+                sendMessage($targetUserId, "⚠️ Ваша заявка на вывод <b>$amount</b> баллов <b>ОТКЛОНЕНА</b>. Средства остаются на балансе.");
                 answerCallbackQuery($callbackQueryId);
                 $callbackAnswered = true;
             } else {
@@ -874,7 +946,7 @@ try {
                 sendMessage($chatId, "Пожалуйста, используйте кнопки меню. Если меню не видно, используйте команду /start.", getMainMenuInlineKeyboard($userIsAdmin), $message_thread_id);
             } else {
                 $subKeyboard = getSubscriptionKeyboard();
-                $subMessage = "Привет! Пожалуйста, подпишитесь на наш канал для доступа к боту.";
+                $subMessage = "Привет! Пожалуйста, <b>подпишитесь на наш канал</b> для доступа к боту.";
                 if ($subKeyboard) {
                     sendMessage($chatId, $subMessage, $subKeyboard, $message_thread_id);
                 } else {
@@ -885,6 +957,11 @@ try {
     }
 } catch (Throwable $e) {
     bot_log("!!! Uncaught Throwable: ".$e->getMessage()." in ".$e->getFile().":".$e->getLine()."\nStack trace:\n".$e->getTraceAsString(), "FATAL");
+    
+    // Отправляем уведомление админу о критической ошибке
+    if (!empty($adminId)) {
+        sendMessage($adminId, "❌ Критическая ошибка в боте: ".$e->getMessage());
+    }
 }
 
 // Всегда отвечаем OK для Telegram
