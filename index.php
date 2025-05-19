@@ -517,6 +517,8 @@ function handleStart($chatId, $userId, $text) {
     $message .= "👇 Используйте меню ниже для навигации.";
     sendMessage($chatId, $message, getMainMenuInlineKeyboard($userId == $adminId));
     
+
+}
     // Для тестирования HTML-форматирования у админа
     if ($userId == $adminId) {
         testFormatting($adminId);
