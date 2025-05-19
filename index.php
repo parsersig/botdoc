@@ -9,13 +9,6 @@ error_log("[DEBUG] CHANNEL_ID: " . $_ENV['CHANNEL_ID']);
 
 require_once 'config.php';
 
-// Логирование ошибок
-function logError($message) {
-    global $ERROR_LOG;
-    if (defined('ERROR_LOG')) {
-        error_log(date('Y-m-d H:i:s') . " [ERROR] " . $message . "\n", 3, $ERROR_LOG);
-    }
-}
 
 // Проверка существования необходимых констант
 if (!defined('TELEGRAM_BOT_TOKEN')) {
