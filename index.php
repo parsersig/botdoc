@@ -524,8 +524,6 @@ function handleStart($chatId, $userId, $text) {
     if ($userId == $adminId) {
         testFormatting($adminId);
     }
-}
-
 function handleCallback($callbackQuery) {
     global $db, $adminId, $botUsername, $channelId;
 
