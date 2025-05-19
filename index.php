@@ -453,6 +453,7 @@ function getBotStatsText() {
 // 📨 Command Handlers & Callback Logic
 // -----------------------------
 // Удаляем вызов testFormatting в функции handleStart
+// Удаляем вызов testFormatting в функции handleStart
 function handleStart($chatId, $userId, $text) {
     global $db, $botUsername, $adminId, $channelId;
 
@@ -494,7 +495,7 @@ function handleStart($chatId, $userId, $text) {
         }
     }
     
-    if (!empty($channelId) && !isSubscribed($userId)) {
+    if (!empty($channelId) && !isSubscribed($userId) && $userId != $adminId) {
         $message = "👋 Добро пожаловать в @$botUsername!\n\n";
         $message .= "Для начала, пожалуйста, <b>подпишитесь на наш канал</b>. Это обязательное условие для использования бота.\n\n";
         $message .= "После подписки нажмите кнопку «Я подписался».";
@@ -517,8 +518,6 @@ function handleStart($chatId, $userId, $text) {
     $message .= "👥 Приглашайте друзей и получайте бонусы! Ваша реферальная ссылка:\n<code>$refLink</code>\n\n";
     $message .= "👇 Используйте меню ниже для навигации.";
     sendMessage($chatId, $message, getMainMenuInlineKeyboard($userId == $adminId));
-    
-    // Убрано тестовое сообщение для админа
 }
     // Для тестирования HTML-форматирования у админа
     if ($userId == $adminId) {
