@@ -1,3 +1,23 @@
+<Files "config.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+<Files "users.json">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+<Files "error.log">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+<Files "request.log">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteCond %{REQUEST_FILENAME} !-f
