@@ -47,7 +47,8 @@ register_shutdown_function(function() use ($errorLogPath) {
 $botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
 $adminId = getenv('ADMIN_ID') ?: '';
 $botUsername = getenv('BOT_USERNAME') ?: 'CRYPTOCAP_ROBOT';
-$channelId = getenv('CHANNEL_ID') ?: '-1002543728373'; // Используем ID вашего канала
+$channelId = getenv('CHANNEL_ID') ?: '@otch1'; // Используем username канала вместо ID
+$channelUsername = 'otch1'; // Имя канала без @
 $webhookBaseUrl = getenv('WEBHOOK_BASE_URL') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
 
 // Validate essential config
@@ -59,6 +60,7 @@ if (empty($botToken) || empty($adminId)) {
 
 // API URL
 $apiUrl = "https://api.telegram.org/bot$botToken";
+
 // -----------------------------
 // 🛠️ Helper Functions
 // -----------------------------
@@ -67,7 +69,6 @@ function bot_log($message, $level = "INFO") {
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($errorLogPath, "[$timestamp] [$level] $message\n", FILE_APPEND);
 }
-
 // Initialize database
 try {
     $dataDir = dirname($dbFilePath);
@@ -210,7 +211,6 @@ if (empty($content)) {
 
 // Логируем входящие данные
 bot_log("Received update: " . $content, "INFO");
-
 function apiRequest($method, $params = [], $retries = 3) {
     global $apiUrl, $errorLogPath;
     $url = "$apiUrl/$method";
@@ -306,13 +306,13 @@ function answerCallbackQuery($callbackQueryId, $text = null, $showAlert = false)
 }
 
 function isSubscribed($userId) {
-    global $botToken, $channelId;
+    global $botToken, $channelId, $channelUsername;
     if (empty($channelId)) {
         return true;
     }
     
     // Прямой запрос к API для проверки подписки на конкретный канал
-    $url = "https://api.telegram.org/bot$botToken/getChatMember?chat_id=" . $channelId . "&user_id=$userId";
+    $url = "https://api.telegram.org/bot$botToken/getChatMember?chat_id=$channelId&user_id=$userId";
     $response = @file_get_contents($url); 
     if ($response === false) {
         bot_log("isSubscribed: Failed to fetch from $url. User: $userId", "ERROR");
@@ -344,6 +344,7 @@ function testFormatting($adminId) {
         "<a href='https://t.me/'>Тест ссылки</a>"
     );
 }
+
 // -----------------------------
 // 💰 Инвестиционные планы
 // -----------------------------
@@ -370,7 +371,6 @@ $investmentPlans = [
         'description' => 'Инвестиционный план на 30 дней с доходностью 90%'
     ]
 ];
-
 function createInvestment($userId, $planId, $amount) {
     global $db, $investmentPlans;
     
@@ -484,11 +484,10 @@ function checkCompletedInvestments() {
 // ⌨️ Keyboards (All Inline)
 // -----------------------------
 function getSubscriptionKeyboard() {
-    global $channelId;
-    if (empty($channelId)) return null;
-
-    // Обновляем метод генерации ссылки на канал
-    $channelUrl = 'https://t.me/otch1'; // Добавляем прямую ссылку на канал
+    global $channelUsername;
+    
+    // Используем прямую ссылку на канал
+    $channelUrl = 'https://t.me/' . $channelUsername;
     
     return [
         'inline_keyboard' => [[
@@ -602,7 +601,6 @@ function getUserActionsKeyboard($targetUserId, $isBlocked) {
         ]
     ]];
 }
-
 // -----------------------------
 // 📊 Bot Stats & Info
 // -----------------------------
@@ -640,7 +638,7 @@ function getBotStatsText() {
         }
     }
 
-       $message = "📊 <b>Статистика бота</b>\n";
+    $message = "📊 <b>Статистика бота</b>\n";
     $message .= "👥 Всего пользователей: <b>{$stats['total']}</b>\n";
     $message .= "🟢 Активных (не заблокированных): <b>{$stats['active']}</b>\n";
     $message .= "💰 Общий баланс пользователей: <b>{$stats['balance']}</b>\n";
@@ -1069,15 +1067,15 @@ function handleCallback($callbackQuery) {
                 }
             }
             
-            if ($count == 0) $message .= "Пока нет активных инвестиций.";
-            
-            $message .= "\n⚠️ Для проверки и начисления завершенных инвестиций используйте эндпоинт <code>/check_investments=1</code>";
+            if ($count == 0) {
+                $message .= "Пока нет активных инвестиций.";
+            }
             
             editMessage($chatId, $msgId, $message, getBackToAdminPanelKeyboard());
             answerCallbackQuery($callbackQueryId);
             $callbackAnswered = true;
         }
-                else if ($data === 'admin_users_list') {
+        else if ($data === 'admin_users_list') {
             $result = $db->query("SELECT user_id, username, balance, blocked FROM users ORDER BY joined_at DESC LIMIT 20"); 
             $usersKeyboard = ['inline_keyboard' => []];
             $userListText = "👥 <b>Список участников (последние 20)</b>:\n\n";
