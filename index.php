@@ -18,8 +18,9 @@ ini_set('error_log', '/tmp/error.log');
 
 // Константы
 define('DB_FILE', '/tmp/bot_database.db');
-define('CHANNEL_ID', '@your_channel'); // Замените на ваш канал
+define('CHANNEL_ID', '@your_channel'); // Замените на ваш реальный канал
 define('WEBHOOK_URL', 'https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+define('MIN_WITHDRAW', 100); // Минимальная сумма вывода
 
 // Переменные окружения
 $botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
@@ -34,7 +35,7 @@ foreach (['TELEGRAM_BOT_TOKEN'=>$botToken, 'ADMIN_ID'=>$adminId, 'BOT_USERNAME'=
     }
 }
 
-$apiUrl = "https://api.telegram.org/bot$botToken/";
+$apiUrl = "https://api.telegram.org/bot $botToken/";
 
 // Инициализация БД
 try {
@@ -70,7 +71,7 @@ function apiRequest($method, $params = [], $retries = 3) {
 
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_URL => $apiUrl . $method,
+        CURLOPT_URL => $apiUrl.$method,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $params,
@@ -134,7 +135,7 @@ function editMessage($chatId, $msgId, $text, $keyboard = null) {
 
 function isSubscribed($userId) {
     global $botToken;
-    $response = file_get_contents("https://api.telegram.org/bot$botToken/getChatMember?chat_id=" . CHANNEL_ID . "&user_id=$userId");
+    $response = file_get_contents("https://api.telegram.org/bot $botToken/getChatMember?chat_id=" . CHANNEL_ID . "&user_id=$userId");
     $data = json_decode($response, true);
     return in_array($data['result']['status'] ?? '', ['member', 'administrator', 'creator']);
 }
@@ -145,7 +146,7 @@ function isSubscribed($userId) {
 function getSubscriptionKeyboard() {
     return [
         'inline_keyboard' => [[
-            ['text' => '📢 Наш канал', 'url' => 'https://t.me/' . ltrim(CHANNEL_ID, '-')],
+            ['text' => '📢 Наш канал', 'url' => 'https://t.me/ ' . ltrim(CHANNEL_ID, '-')],
             ['text' => '✅ Я подписался', 'callback_data' => 'check_subscription']
         ]]
     ];
@@ -155,7 +156,7 @@ function getMainKeyboard($isAdmin = false) {
     $keyboard = [
         ['💰 Заработать', '💳 Баланс'],
         ['🏆 Топ', '👥 Рефералы'],
-        ['mtx', 'mtw']
+        [' mtx', ' mtw']
     ];
 
     if ($isAdmin) {
@@ -238,7 +239,7 @@ function getBotStats() {
 // 📨 Обработка команд
 // -----------------------------
 function handleStart($chatId, $text) {
-    global $db, $botUsername, $adminId;
+    global $db, $botUsername;
     $refCode = trim(str_replace('/start', '', $text));
 
     if ($refCode && !$db->querySingle("SELECT referred_by FROM users WHERE user_id=$chatId")) {
@@ -257,16 +258,16 @@ function handleStart($chatId, $text) {
     }
 
     $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-    $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
+    $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
 
     $message = "👋 Добро пожаловать в @{$botUsername}!\n";
     $message .= "💰 Зарабатывайте баллы и выводите их\n";
     $message .= "👥 Приглашайте друзей по реферальной ссылке:\n<code>$refLink</code>";
-    sendMessage($chatId, $message, getMainKeyboard($chatId == $adminId));
+    sendMessage($chatId, $message, getMainKeyboard($chatId == $GLOBALS['adminId']));
 }
 
 function handleCallback($callbackQuery) {
-    global $db, $adminId, $botUsername;
+    global $db, $adminId;
 
     $chatId = $callbackQuery['message']['chat']['id'];
     $msgId = $callbackQuery['message']['message_id'];
@@ -275,9 +276,9 @@ function handleCallback($callbackQuery) {
     if ($data === 'check_subscription') {
         if (isSubscribed($chatId)) {
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
+            $refLink = "https://t.me/ " . $GLOBALS['botUsername'] . "?start={$user['ref_code']}";
             $message = "✅ Спасибо за подписку!\nТеперь вы можете пользоваться ботом.\nРеферальная ссылка: <code>$refLink</code>";
-            sendMessage($chatId, $message, getMainKeyboard($chatId == $adminId));
+            sendMessage($chatId, $message, getMainKeyboard($chatId == $GLOBALS['adminId']));
         } else {
             sendMessage($chatId, "❌ Вы ещё не подписаны. Нажмите кнопку ещё раз после подписки.", getSubscriptionKeyboard());
         }
@@ -379,31 +380,37 @@ function handleCommand($chatId, $text) {
                 break;
             }
 
-            $db->exec("UPDATE users SET balance=balance+10, last_earn=" . time() . " WHERE user_id=$chatId");
+            $db->exec("UPDATE users SET 
+                balance=balance+10, 
+                last_earn=" . time() . " 
+                WHERE user_id=$chatId");
+
             $newBalance = $db->querySingle("SELECT balance FROM users WHERE user_id=$chatId");
             sendMessage($chatId, "✅ +10 баллов! Текущий баланс: $newBalance");
             break;
 
-        case 'mtx':
+        case ' mtx':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            if ($user['balance'] < 100) {
-                sendMessage($chatId, "❌ Минимальная сумма вывода: 100 баллов");
+            $balance = $user['balance'];
+
+            if ($balance < MIN_WITHDRAW) {
+                $needed = MIN_WITHDRAW - $balance;
+                sendMessage($chatId, "❌ Минимальная сумма вывода: " . MIN_WITHDRAW . " баллов\nВам не хватает: $needed баллов");
                 break;
             }
 
-            $amount = $user['balance'];
-            $db->exec("UPDATE users SET balance=0, withdraw_status='pending' WHERE user_id=$chatId");
+            $db->exec("UPDATE users SET balance=0 WHERE user_id=$chatId");
 
             $adminMsg = "🔔 Новый запрос на вывод\n";
             $adminMsg .= "👤 Пользователь: $chatId\n";
-            $adminMsg .= "💰 Сумма: $amount баллов\n";
+            $adminMsg .= "💰 Сумма: $balance баллов\n";
             $adminMsg .= "⏱ Время: " . date('d.m.Y H:i:s');
 
             sendMessage($adminId, $adminMsg, getWithdrawKeyboard($chatId));
-            sendMessage($chatId, "✅ Запрос на вывод $amount баллов отправлен администратору.");
+            sendMessage($chatId, "✅ Запрос на вывод $balance баллов отправлен администратору.");
             break;
 
-        case 'mtw':
+        case ' mtw':
             $msg = "ℹ️ <b>Помощь</b>\n";
             $msg .= "💰 <b>Заработать</b> — получайте 10 баллов каждую минуту\n";
             $msg .= "👥 <b>Рефералы</b> — приглашайте друзей и получайте бонусы\n";
@@ -418,7 +425,7 @@ function handleCommand($chatId, $text) {
 
         case '👥 Рефералы':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
+            $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
             $msg = "👥 <b>Реферальная система</b>\n";
             $msg .= "Ваш код: <code>{$user['ref_code']}</code>\n";
             $msg .= "Приглашено: <b>{$user['referrals']}</b>\n";
@@ -466,7 +473,7 @@ try {
 
         // Инициализация пользователя
         if (!$db->querySingle("SELECT 1 FROM users WHERE user_id=$chatId")) {
-            $username = $message['from']['username'] ?? '';
+            $username = $message['from']['username'] ?? null;
             $refCode = substr(md5($chatId . time()), 0, 8);
             $db->exec("INSERT INTO users (
                 user_id, username, balance, referrals, ref_code, referred_by, subscribed, blocked, last_earn
@@ -487,7 +494,17 @@ try {
 
         if (strpos($text, '/start') === 0) {
             handleStart($chatId, $text);
-        } elseif ($text === '💰 Заработать' || $text === 'mtx' || $text === 'mtw' || $text === '🏆 Топ' || $text === '👥 Рефералы' || $text === '⚙️ Админ') {
+        } elseif ($text === '💰 Заработать') {
+            handleCommand($chatId, $text);
+        } elseif ($text === ' mtx') {
+            handleCommand($chatId, $text);
+        } elseif ($text === ' mtw') {
+            handleCommand($chatId, $text);
+        } elseif ($text === '🏆 Топ') {
+            handleCommand($chatId, $text);
+        } elseif ($text === '👥 Рефералы') {
+            handleCommand($chatId, $text);
+        } elseif ($text === '⚙️ Админ') {
             handleCommand($chatId, $text);
         }
     }
