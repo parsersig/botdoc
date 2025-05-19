@@ -46,8 +46,8 @@ register_shutdown_function(function() use ($errorLogPath) {
 // Constants from Environment Variables
 $botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
 $adminId = getenv('ADMIN_ID') ?: '';
-$botUsername = getenv('BOT_USERNAME') ?: 'MyTestBot';
-$channelId = getenv('CHANNEL_ID') ?: '';
+$botUsername = getenv('BOT_USERNAME') ?: 'CRYPTOCAP_ROBOT';
+$channelId = getenv('CHANNEL_ID') ?: '-1002543728373'; // Используем ID вашего канала
 $webhookBaseUrl = getenv('WEBHOOK_BASE_URL') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
 
 // Validate essential config
@@ -59,7 +59,6 @@ if (empty($botToken) || empty($adminId)) {
 
 // API URL
 $apiUrl = "https://api.telegram.org/bot$botToken";
-
 // -----------------------------
 // 🛠️ Helper Functions
 // -----------------------------
@@ -312,6 +311,7 @@ function isSubscribed($userId) {
         return true;
     }
     
+    // Прямой запрос к API для проверки подписки на конкретный канал
     $url = "https://api.telegram.org/bot$botToken/getChatMember?chat_id=" . $channelId . "&user_id=$userId";
     $response = @file_get_contents($url); 
     if ($response === false) {
@@ -329,7 +329,9 @@ function isSubscribed($userId) {
         }
         return false;
     }
-    return isset($data['result']['status']) && in_array($data['result']['status'], ['member', 'administrator', 'creator']);
+    
+    $status = $data['result']['status'] ?? '';
+    return in_array($status, ['member', 'administrator', 'creator']);
 }
 
 // Test function for formatting
@@ -342,7 +344,6 @@ function testFormatting($adminId) {
         "<a href='https://t.me/'>Тест ссылки</a>"
     );
 }
-
 // -----------------------------
 // 💰 Инвестиционные планы
 // -----------------------------
@@ -486,20 +487,12 @@ function getSubscriptionKeyboard() {
     global $channelId;
     if (empty($channelId)) return null;
 
-    $channelUrl = '';
-    if (strpos((string)$channelId, "-100") === 0) {
-        $channelIdForLink = substr((string)$channelId, 4);
-        $channelUrl = 'https://t.me/c/' . $channelIdForLink;
-    } elseif ($channelId[0] === '@') {
-        $channelUrl = 'https://t.me/' . ltrim($channelId, '@');
-    } else {
-        bot_log("Cannot generate channel URL for Channel ID: $channelId", "WARNING");
-        return null;
-    }
-
+    // Обновляем метод генерации ссылки на канал
+    $channelUrl = 'https://t.me/otch1'; // Добавляем прямую ссылку на канал
+    
     return [
         'inline_keyboard' => [[
-            ['text' => '📢 Наш канал', 'url' => $channelUrl],
+            ['text' => '📢 Подписаться на канал', 'url' => $channelUrl],
             ['text' => '✅ Я подписался', 'callback_data' => 'check_subscription']
         ]]
     ];
@@ -718,7 +711,7 @@ function handleStart($chatId, $userId, $text) {
     }
     
     if (!empty($channelId) && !isSubscribed($userId) && $userId != $adminId) {
-        $message = "👋 Добро пожаловать в @$botUsername!\n\n";
+        $message = "👋 Добро пожаловать в @CRYPTOCAP_ROBOT!\n\n";
         $message .= "Для начала, пожалуйста, <b>подпишитесь на наш канал</b>. Это обязательное условие для использования бота.\n\n";
         $message .= "После подписки нажмите кнопку «Я подписался».";
         $subKeyboard = getSubscriptionKeyboard();
@@ -735,13 +728,12 @@ function handleStart($chatId, $userId, $text) {
     $user = $userStmt->execute()->fetchArray(SQLITE3_ASSOC);
     $refLink = "https://t.me/$botUsername?start=" . ($user['ref_code'] ?? '');
 
-    $message = "👋 Добро пожаловать в @$botUsername!\n\n";
+    $message = "👋 Добро пожаловать в @CRYPTOCAP_ROBOT!\n\n";
     $message .= "💰 Зарабатывайте баллы, инвестируйте и выводите прибыль.\n";
     $message .= "👥 Приглашайте друзей и получайте бонусы! Ваша реферальная ссылка:\n<code>$refLink</code>\n\n";
     $message .= "👇 Используйте меню ниже для навигации.";
     sendMessage($chatId, $message, getMainMenuInlineKeyboard($userId == $adminId));
 }
-
 function handleCallback($callbackQuery) {
     global $db, $adminId, $botUsername, $channelId, $investmentPlans;
 
@@ -774,7 +766,7 @@ function handleCallback($callbackQuery) {
             answerCallbackQuery($callbackQueryId);
             $callbackAnswered = true;
         } else {
-            answerCallbackQuery($callbackQueryId, "❌ Вы всё ещё не подписаны. Пожалуйста, подпишитесь и нажмите кнопку ещё раз.", true);
+            answerCallbackQuery($callbackQueryId, "❌ Вы всё ещё не подписаны на канал @otch1. Пожалуйста, подпишитесь и нажмите кнопку ещё раз.", true);
             $callbackAnswered = true;
         }
         return;
@@ -782,7 +774,7 @@ function handleCallback($callbackQuery) {
     
     // Проверка подписки для всех других действий
     if (!$userIsAdmin && !empty($channelId) && !isSubscribed($userId)) {
-        $text = "Пожалуйста, <b>подпишитесь на наш канал</b>, чтобы продолжить.";
+        $text = "👋 Добро пожаловать в @CRYPTOCAP_ROBOT!\n\nПожалуйста, <b>подпишитесь на наш канал</b>, чтобы продолжить.";
         $subKeyboard = getSubscriptionKeyboard();
         if ($subKeyboard) {
             editMessage($chatId, $msgId, $text, $subKeyboard);
@@ -1085,8 +1077,8 @@ function handleCallback($callbackQuery) {
             answerCallbackQuery($callbackQueryId);
             $callbackAnswered = true;
         }
-        else if ($data === 'admin_users_list') {
-                        $result = $db->query("SELECT user_id, username, balance, blocked FROM users ORDER BY joined_at DESC LIMIT 20"); 
+                else if ($data === 'admin_users_list') {
+            $result = $db->query("SELECT user_id, username, balance, blocked FROM users ORDER BY joined_at DESC LIMIT 20"); 
             $usersKeyboard = ['inline_keyboard' => []];
             $userListText = "👥 <b>Список участников (последние 20)</b>:\n\n";
             $count = 0;
@@ -1345,7 +1337,7 @@ try {
                 sendMessage($chatId, "Пожалуйста, используйте кнопки меню. Если меню не видно, используйте команду /start.", getMainMenuInlineKeyboard($userIsAdmin), $message_thread_id);
             } else {
                 $subKeyboard = getSubscriptionKeyboard();
-                $subMessage = "Привет! Пожалуйста, <b>подпишитесь на наш канал</b> для доступа к боту.";
+                $subMessage = "👋 Добро пожаловать в @CRYPTOCAP_ROBOT!\n\nПожалуйста, <b>подпишитесь на наш канал</b> для доступа к боту.";
                 if ($subKeyboard) {
                     sendMessage($chatId, $subMessage, $subKeyboard, $message_thread_id);
                 } else {
