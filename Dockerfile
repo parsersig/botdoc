@@ -2,30 +2,27 @@ FROM php:8.2-apache
 
 # Установка зависимостей
 RUN apt-get update && apt-get install -y \
+    sqlite3 \
     libcurl4-openssl-dev \
-    && docker-php-ext-install curl \
+    && docker-php-ext-install pdo pdo_sqlite curl \
+    && a2enmod rewrite \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Копирование файлов
-COPY . /var/www/html
+WORKDIR /var/www/html
+COPY . .
 
-# Установка прав доступа
-RUN chown -R www-data:www-data /var/www/html /tmp \
-    && chmod -R 775 /var/www/html /tmp
-
-# Включение модуля rewrite
-RUN a2enmod rewrite
+# Установка прав доступа для /tmp и базы
+RUN chmod -R 777 /tmp && \
+    touch /tmp/bot_database.db && \
+    chmod 777 /tmp/bot_database.db
 
 # Подавление предупреждения ServerName
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
-# Проверка работоспособности
+# Включение healthcheck (опционально, Render сам проверяет)
 HEALTHCHECK --interval=30s --timeout=3s \
-    CMD curl -f http://localhost/ || exit 1
+    CMD curl -f http://localhost/health || exit 1
 
-# Открытие порта
 EXPOSE 80
-
-# Запуск Apache
-CMD ["apache2-foreground"]
