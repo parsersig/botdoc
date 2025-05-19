@@ -146,7 +146,7 @@ function isSubscribed($userId) {
 function getSubscriptionKeyboard() {
     return [
         'inline_keyboard' => [[
-            ['text' => '📢 Наш канал', 'url' => 'https://t.me/' . ltrim(CHANNEL_ID, '@')],
+            ['text' => '📢 Наш канал', 'url' => 'https://t.me/' . -1002543728373, '@CRYPTOCAP_ROBOT')],
             ['text' => '✅ Я подписался', 'callback_data' => 'check_subscription']
         ]]
     ];
