@@ -1,0 +1,13 @@
+RewriteEngine On RewriteBase /
+
+Route webhook requests to index.php
+
+RewriteRule ^webhook$ index.php [L]
+
+Prevent direct access to sensitive files
+
+<FilesMatch ".(json|log)$"> Order Allow,Deny Deny from all
+
+Ensure PHP files are processed
+
+<FilesMatch ".php$"> SetHandler application/x-httpd-php
