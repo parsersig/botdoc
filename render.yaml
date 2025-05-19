@@ -2,16 +2,15 @@ services:
   - type: web
     name: botdoc
     runtime: docker
-    env: docker
-    build:
-      dockerfile: Dockerfile
+    plan: free
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        value: ${TELEGRAM_BOT_TOKEN}
+        sync: false # Укажите значение в панели Render.com
       - key: ADMIN_ID
-        value: ${ADMIN_ID}
+        sync: false # Укажите значение в панели Render.com
       - key: BOT_USERNAME
-        value: ${BOT_USERNAME}
-      - key: CHANNEL_ID
-        value: ${CHANNEL_ID}
+        sync: false # Укажите значение в панели Render.com
+    numInstances: 1
+    healthCheckPath: /
     port: 80
