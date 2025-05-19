@@ -27,19 +27,11 @@ define('REQUEST_LOG', '/tmp/request.log');
 define('WEBHOOK_URL', 'https://'.($_SERVER['HTTP_HOST'] ?? 'localhost'));
 
 // Создание файлов если их нет
-if (!file_exists(USERS_FILE)) {
-    file_put_contents(USERS_FILE, json_encode([]));
-    chmod(USERS_FILE, 0666);
-}
-
-if (!file_exists(ERROR_LOG)) {
-    file_put_contents(ERROR_LOG, '');
-    chmod(ERROR_LOG, 0666);
-}
-
-if (!file_exists(REQUEST_LOG)) {
-    file_put_contents(REQUEST_LOG, '');
-    chmod(REQUEST_LOG, 0666);
+foreach ([USERS_FILE, ERROR_LOG, REQUEST_LOG] as $file) {
+    if (!file_exists($file)) {
+        file_put_contents($file, $file === USERS_FILE ? '[]' : '');
+        chmod($file, 0666);
+    }
 }
 
 // Логирование
@@ -48,31 +40,30 @@ function logMessage($message, $file = ERROR_LOG) {
     file_put_contents($file, "[$timestamp] $message\n", FILE_APPEND);
 }
 
-// Загрузка конфига
-require_once __DIR__.'/config.php';
+// Загрузка конфигурации из переменных окружения
+$botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
+$adminId = getenv('ADMIN_ID') ?: '';
+$botUsername = getenv('BOT_USERNAME') ?: '';
+$channelId = getenv('CHANNEL_ID') ?: null;
 
-// Проверка обязательных констант
-foreach (['TELEGRAM_BOT_TOKEN', 'ADMIN_ID', 'BOT_USERNAME'] as $const) {
-    if (!defined($const) || empty(constant($const))) {
-        logMessage("Critical: Missing or empty $const in config.php");
+// Проверка обязательных переменных
+foreach (['TELEGRAM_BOT_TOKEN' => $botToken, 'ADMIN_ID' => $adminId, 'BOT_USERNAME' => $botUsername] as $key => $value) {
+    if (empty($value)) {
+        logMessage("Critical: Missing or empty $key environment variable");
         http_response_code(500);
         die("Configuration error");
     }
 }
 
 // Инициализация API
-$botToken = TELEGRAM_BOT_TOKEN;
 $apiUrl = "https://api.telegram.org/bot$botToken/";
-$adminId = ADMIN_ID;
-$botUsername = BOT_USERNAME;
-$channelId = defined('CHANNEL_ID') ? CHANNEL_ID : null;
 
 // -----------------------------
 // 🛠️ Вспомогательные функции
 // -----------------------------
 
 function loadUsers() {
-    $data = file_exists(USERS_FILE) ? file_get_contents(USERS_FILE) : '[]';
+    $data = file_get_contents(USERS_FILE);
     $users = json_decode($data, true);
     if ($users === null) {
         logMessage("Error: Failed to decode users.json");
@@ -82,7 +73,7 @@ function loadUsers() {
 }
 
 function saveUsers($users) {
-    if (!file_put_contents(USERS_FILE, json_encode($users, JSON_PRETTY_PRINT))) {
+    if (!file_put_contents(USERS_FILE, json_encode($users, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))) {
         logMessage("Error: Failed to write to users.json");
         return false;
     }
@@ -90,7 +81,7 @@ function saveUsers($users) {
     return true;
 }
 
-function apiRequest($method, $params = []) {
+function apiRequest($method, $params = [], $retries = 3) {
     global $apiUrl;
     
     $url = $apiUrl.$method;
@@ -101,27 +92,39 @@ function apiRequest($method, $params = []) {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $params,
-        CURLOPT_TIMEOUT => 5,
-        CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data']
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data'],
+        CURLOPT_FOLLOWLOCATION => true
     ]);
     
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
+    for ($i = 0; $i < $retries; $i++) {
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        
+        if ($error || $httpCode != 200) {
+            logMessage("API Error: $method - HTTP $httpCode - ".($error ?: "No CURL error"));
+            if ($i < $retries - 1) {
+                sleep(2); // Ждем перед повтором
+                continue;
+            }
+            curl_close($ch);
+            return false;
+        }
+        
+        $result = json_decode($response, true);
+        if (!$result || !isset($result['ok']) || !$result['ok']) {
+            logMessage("API Error: $method - Response: ".json_encode($result));
+            curl_close($ch);
+            return false;
+        }
+        
+        curl_close($ch);
+        return $result;
+    }
+    
     curl_close($ch);
-    
-    if ($error || $httpCode != 200) {
-        logMessage("API Error: $method - HTTP $httpCode - ".($error ?: "No CURL error"));
-        return false;
-    }
-    
-    $result = json_decode($response, true);
-    if (!$result || !isset($result['ok']) || !$result['ok']) {
-        logMessage("API Error: $method - Response: ".json_encode($result));
-        return false;
-    }
-    
-    return $result;
+    return false;
 }
 
 function sendMessage($chatId, $text, $keyboard = null) {
@@ -135,7 +138,8 @@ function sendMessage($chatId, $text, $keyboard = null) {
     if ($keyboard) {
         $params['reply_markup'] = json_encode([
             'keyboard' => $keyboard,
-            'resize_keyboard' => true
+            'resize_keyboard' => true,
+            'one_time_keyboard' => false
         ]);
     }
     
@@ -230,6 +234,7 @@ function handleStart($chatId, $text, &$users) {
                 $users[$id]['referrals'] = ($users[$id]['referrals'] ?? 0) + 1;
                 $users[$id]['balance'] = ($users[$id]['balance'] ?? 0) + 50;
                 sendMessage($id, "🎉 Новый реферал! +50 баллов.");
+                saveUsers($users);
                 break;
             }
         }
@@ -321,6 +326,18 @@ try {
             exit;
         }
         
+        // Защита от дублирования
+        $updateId = $update['update_id'] ?? 0;
+        static $processedUpdates = [];
+        if (in_array($updateId, $processedUpdates)) {
+            echo "OK";
+            exit;
+        }
+        $processedUpdates[] = $updateId;
+        if (count($processedUpdates) > 100) {
+            array_shift($processedUpdates);
+        }
+        
         // Инициализация нового пользователя
         if (!isset($users[$chatId])) {
             $users[$chatId] = [
@@ -330,7 +347,8 @@ try {
                 'ref_code' => substr(md5($chatId.time()), 0, 8),
                 'referred_by' => null,
                 'blocked' => false,
-                'withdraw_status' => null
+                'withdraw_status' => null,
+                'joined_at' => date('Y-m-d H:i:s')
             ];
             saveUsers($users);
         }
@@ -383,6 +401,16 @@ try {
         elseif ($text === '📊 Статистика' && $chatId == $adminId) {
             sendMessage($chatId, getBotStats());
         }
+        elseif ($text === '👤 Список участников' && $chatId == $adminId) {
+            $users = loadUsers();
+            $msg = "👥 <b>Список участников</b>\n\n";
+            foreach ($users as $id => $user) {
+                $status = (isset($user['blocked']) && $user['blocked']) ? '🚫' : '✅';
+                $balance = $user['balance'] ?? 0;
+                $msg .= "ID: $id, Баланс: $balance, Статус: $status\n";
+            }
+            sendMessage($chatId, $msg);
+        }
         elseif ($text === '🔙 Назад' && $chatId == $adminId) {
             sendMessage($chatId, "Главное меню", getMainKeyboard(true));
         }
@@ -393,6 +421,8 @@ try {
                 $msg = $parts[2];
                 sendMessage($targetId, "📩 Сообщение от администратора:\n\n$msg");
                 sendMessage($chatId, "✅ Сообщение отправлено пользователю $targetId");
+            } else {
+                sendMessage($chatId, "❌ Формат: /send <ID> <сообщение>");
             }
         }
         elseif ($chatId == $adminId && strpos($text, '/block ') === 0) {
@@ -407,6 +437,8 @@ try {
                 } else {
                     sendMessage($chatId, "❌ Пользователь не найден");
                 }
+            } else {
+                sendMessage($chatId, "❌ Формат: /block <ID>");
             }
         }
     }
