@@ -452,6 +452,7 @@ function getBotStatsText() {
 // -----------------------------
 // 📨 Command Handlers & Callback Logic
 // -----------------------------
+// Удаляем вызов testFormatting в функции handleStart
 function handleStart($chatId, $userId, $text) {
     global $db, $botUsername, $adminId, $channelId;
 
@@ -517,7 +518,7 @@ function handleStart($chatId, $userId, $text) {
     $message .= "👇 Используйте меню ниже для навигации.";
     sendMessage($chatId, $message, getMainMenuInlineKeyboard($userId == $adminId));
     
-
+    // Убрано тестовое сообщение для админа
 }
     // Для тестирования HTML-форматирования у админа
     if ($userId == $adminId) {
