@@ -300,7 +300,7 @@ function handleCallback($callbackQuery) {
             ['text' => '🚫 Заблокировать', 'callback_data' => "block_$userId"]
         ],[
             ['text' => '⬅️ Назад', 'callback_data' => 'admin_users']
-        ]];
+        ]],
 
         editMessage($chatId, $msgId, $message, $keyboard);
     }
