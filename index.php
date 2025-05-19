@@ -27,7 +27,7 @@ $botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
 $adminId = getenv('ADMIN_ID') ?: '';
 $botUsername = getenv('BOT_USERNAME') ?: 'CRYPTOCAP_ROBOT';
 
-foreach (['TELEGRAM_BOT_TOKEN'=>$botToken, 'ADMIN_ID'=>$adminId, 'BOT_USERNAME'=>$botUsername] as $key=>$value) {
+foreach (['TELEGRAM_BOT_TOKEN' => $botToken, 'ADMIN_ID' => $adminId, 'BOT_USERNAME' => $botUsername] as $key => $value) {
     if (empty($value)) {
         logMessage("Critical: Missing or empty $key environment variable");
         http_response_code(500);
@@ -35,7 +35,7 @@ foreach (['TELEGRAM_BOT_TOKEN'=>$botToken, 'ADMIN_ID'=>$adminId, 'BOT_USERNAME'=
     }
 }
 
-$apiUrl = "https://api.telegram.org/bot $botToken/";
+$apiUrl = "https://api.telegram.org/bot$botToken/";
 
 // Инициализация БД
 try {
@@ -135,7 +135,7 @@ function editMessage($chatId, $msgId, $text, $keyboard = null) {
 
 function isSubscribed($userId) {
     global $botToken;
-    $response = file_get_contents("https://api.telegram.org/bot $botToken/getChatMember?chat_id=" . CHANNEL_ID . "&user_id=$userId");
+    $response = file_get_contents("https://api.telegram.org/bot$botToken/getChatMember?chat_id=" . CHANNEL_ID . "&user_id=$userId");
     $data = json_decode($response, true);
     return in_array($data['result']['status'] ?? '', ['member', 'administrator', 'creator']);
 }
@@ -146,7 +146,7 @@ function isSubscribed($userId) {
 function getSubscriptionKeyboard() {
     return [
         'inline_keyboard' => [[
-            ['text' => '📢 Наш канал', 'url' => 'https://t.me/ ' . ltrim(CHANNEL_ID, '-')],
+            ['text' => '📢 Наш канал', 'url' => 'https://t.me/' . ltrim(CHANNEL_ID, '@')],
             ['text' => '✅ Я подписался', 'callback_data' => 'check_subscription']
         ]]
     ];
@@ -156,7 +156,7 @@ function getMainKeyboard($isAdmin = false) {
     $keyboard = [
         ['💰 Заработать', '💳 Баланс'],
         ['🏆 Топ', '👥 Рефералы'],
-        [' mtx', ' mtw']
+        ['/mtx', '/mtw']
     ];
 
     if ($isAdmin) {
@@ -184,7 +184,7 @@ function getUserActionsKeyboard($userId) {
         ['text' => '🗑 Удалить', 'callback_data' => "delete_$userId"]
     ],[
         ['text' => '⬅️ Назад', 'callback_data' => 'admin_users']
-    ]];
+    ]]];
 }
 
 function getWithdrawKeyboard($userId) {
@@ -258,7 +258,7 @@ function handleStart($chatId, $text) {
     }
 
     $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-    $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
+    $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
 
     $message = "👋 Добро пожаловать в @{$botUsername}!\n";
     $message .= "💰 Зарабатывайте баллы и выводите их\n";
@@ -276,7 +276,7 @@ function handleCallback($callbackQuery) {
     if ($data === 'check_subscription') {
         if (isSubscribed($chatId)) {
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            $refLink = "https://t.me/ " . $GLOBALS['botUsername'] . "?start={$user['ref_code']}";
+            $refLink = "https://t.me/" . $GLOBALS['botUsername'] . "?start={$user['ref_code']}";
             $message = "✅ Спасибо за подписку!\nТеперь вы можете пользоваться ботом.\nРеферальная ссылка: <code>$refLink</code>";
             sendMessage($chatId, $message, getMainKeyboard($chatId == $GLOBALS['adminId']));
         } else {
@@ -389,7 +389,7 @@ function handleCommand($chatId, $text) {
             sendMessage($chatId, "✅ +10 баллов! Текущий баланс: $newBalance");
             break;
 
-        case ' mtx':
+        case '/mtx':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
             $balance = $user['balance'];
 
@@ -410,11 +410,11 @@ function handleCommand($chatId, $text) {
             sendMessage($chatId, "✅ Запрос на вывод $balance баллов отправлен администратору.");
             break;
 
-        case ' mtw':
+        case '/mtw':
             $msg = "ℹ️ <b>Помощь</b>\n";
             $msg .= "💰 <b>Заработать</b> — получайте 10 баллов каждую минуту\n";
             $msg .= "👥 <b>Рефералы</b> — приглашайте друзей и получайте бонусы\n";
-            $msg .= "mtx <b>Вывод</b> — минимальная сумма 100 баллов\n";
+            $msg .= "/mtx <b>Вывод</b> — минимальная сумма 100 баллов\n";
             $msg .= "Используйте кнопки меню для навигации!";
             sendMessage($chatId, $msg);
             break;
@@ -425,7 +425,7 @@ function handleCommand($chatId, $text) {
 
         case '👥 Рефералы':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
-            $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
+            $refLink = "https://t.me/$botUsername?start={$user['ref_code']}";
             $msg = "👥 <b>Реферальная система</b>\n";
             $msg .= "Ваш код: <code>{$user['ref_code']}</code>\n";
             $msg .= "Приглашено: <b>{$user['referrals']}</b>\n";
@@ -496,9 +496,9 @@ try {
             handleStart($chatId, $text);
         } elseif ($text === '💰 Заработать') {
             handleCommand($chatId, $text);
-        } elseif ($text === ' mtx') {
+        } elseif ($text === '/mtx') {
             handleCommand($chatId, $text);
-        } elseif ($text === ' mtw') {
+        } elseif ($text === '/mtw') {
             handleCommand($chatId, $text);
         } elseif ($text === '🏆 Топ') {
             handleCommand($chatId, $text);
