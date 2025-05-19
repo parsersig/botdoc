@@ -1,16 +1,11 @@
-<?php
 // =============================================
 // 🚀 Telegram Bot Webhook Handler for Render.com
 // =============================================
-// Version 1.3.0: Configurable paths, improved callback handling
+// Version 1.4.0: Оптимизированная версия с исправленными инлайн-кнопками
 
 // --- Configuration ---
-// Эти пути будут использоваться, если переменные окружения не установлены.
-// Для Render.com, установите DB_FILE_PATH и ERROR_LOG_PATH через переменные окружения
-// чтобы указывать на ваш Render Disk (например, /mnt/disk/bot_database.db)
-
 define('DEFAULT_DB_FILE', '/tmp/bot_database.db');
-define('DEFAULT_ERROR_LOG_FILE', '/tmp/error.log'); // Лог ошибок PHP и бота
+define('DEFAULT_ERROR_LOG_FILE', '/tmp/error.log');
 
 $dbFilePath = getenv('DB_FILE_PATH') ?: DEFAULT_DB_FILE;
 $errorLogPath = getenv('ERROR_LOG_PATH') ?: DEFAULT_ERROR_LOG_FILE;
@@ -18,7 +13,7 @@ $errorLogPath = getenv('ERROR_LOG_PATH') ?: DEFAULT_ERROR_LOG_FILE;
 // Устанавливаем error_log для PHP
 ini_set('error_log', $errorLogPath);
 ini_set('log_errors', 1);
-ini_set('display_errors', 0); // Не отображать ошибки пользователям
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
 // Health check endpoint
@@ -27,7 +22,7 @@ if (isset($_SERVER['REQUEST_URI']) && $_SERVER['REQUEST_URI'] === '/health') {
     echo json_encode([
         'status' => 'ok',
         'time' => date('Y-m-d H:i:s'),
-        'version' => '1.3.0'
+        'version' => '1.4.0'
     ]);
     exit;
 }
@@ -47,12 +42,11 @@ register_shutdown_function(function() use ($errorLogPath) {
     }
 });
 
-
 // Constants from Environment Variables
 $botToken = getenv('TELEGRAM_BOT_TOKEN') ?: '';
 $adminId = getenv('ADMIN_ID') ?: '';
-$botUsername = getenv('BOT_USERNAME') ?: 'MyTestBot'; // Default fallback
-$channelId = getenv('CHANNEL_ID') ?: ''; // Может быть не установлен, проверяйте использование
+$botUsername = getenv('BOT_USERNAME') ?: 'MyTestBot';
+$channelId = getenv('CHANNEL_ID') ?: '';
 $webhookBaseUrl = getenv('WEBHOOK_BASE_URL') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
 
 // Validate essential config
@@ -62,7 +56,6 @@ if (empty($botToken) || empty($adminId)) {
     die("Configuration error: Missing TELEGRAM_BOT_TOKEN or ADMIN_ID");
 }
 
-
 // API URL
 $apiUrl = "https://api.telegram.org/bot$botToken";
 
@@ -70,15 +63,14 @@ $apiUrl = "https://api.telegram.org/bot$botToken";
 try {
     $dataDir = dirname($dbFilePath);
     if (!is_dir($dataDir)) {
-        mkdir($dataDir, 0775, true); // Attempt to create data directory
+        mkdir($dataDir, 0775, true);
     }
     if (!file_exists($dbFilePath) && is_writable($dataDir)) {
-        touch($dbFilePath); // Create file if it doesn't exist to ensure correct permissions later
+        touch($dbFilePath);
     }
     if (file_exists($dbFilePath) && !is_writable($dbFilePath)) {
-         chmod($dbFilePath, 0666); // Ensure writable if exists
+        chmod($dbFilePath, 0666);
     }
-
 
     $db = new SQLite3($dbFilePath);
     $db->exec("CREATE TABLE IF NOT EXISTS users (
@@ -100,12 +92,12 @@ try {
 
 // Webhook auto-setup
 if (isset($_GET['setwebhook']) && $_GET['setwebhook'] === '1') {
-    $scriptPath = $_SERVER['PHP_SELF']; // e.g. /index.php
+    $scriptPath = $_SERVER['PHP_SELF'];
     $webhookUrlToSet = rtrim($webhookBaseUrl, '/') . $scriptPath;
     $setWebhookUrl = "$apiUrl/setWebhook?url=" . urlencode($webhookUrlToSet);
-    $result = @file_get_contents($setWebhookUrl); // Use @ to suppress errors if any, log them instead
+    $result = @file_get_contents($setWebhookUrl);
     $logEntry = "[".date('Y-m-d H:i:s')."] Webhook setup attempt to $webhookUrlToSet. Result: $result\n";
-    file_put_contents($errorLogPath, $logEntry, FILE_APPEND); // Log to error_log for visibility
+    file_put_contents($errorLogPath, $logEntry, FILE_APPEND);
     echo "Webhook setup attempt. Result: " . htmlspecialchars($result);
     exit;
 }
@@ -117,14 +109,12 @@ if (isset($_GET['deletewebhook']) && $_GET['deletewebhook'] === '1') {
     exit;
 }
 
-
 // Main webhook handler
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    // Allow GET for health check and webhook setup, otherwise only POST
     if (! (isset($_SERVER['REQUEST_URI']) && $_SERVER['REQUEST_URI'] === '/health') &&
         ! (isset($_GET['setwebhook']) && $_GET['setwebhook'] === '1') &&
         ! (isset($_GET['deletewebhook']) && $_GET['deletewebhook'] === '1') ) {
-        http_response_code(405); // Method Not Allowed
+        http_response_code(405);
         echo "Method Not Allowed. This endpoint expects POST requests from Telegram.";
     }
     exit;
@@ -132,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $content = file_get_contents("php://input");
 if (empty($content)) {
-    http_response_code(200); // Telegram expects 200 even for empty POSTs sometimes (e.g. during webhook test)
+    http_response_code(200);
     echo "Empty request body.";
     exit;
 }
@@ -141,17 +131,19 @@ if (empty($content)) {
 // 🛠️ Helper Functions
 // -----------------------------
 function bot_log($message, $level = "INFO") {
-    global $errorLogPath; // Use the global error log path
+    global $errorLogPath;
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($errorLogPath, "[$timestamp] [$level] $message\n", FILE_APPEND);
 }
 
 function apiRequest($method, $params = [], $retries = 3) {
-    global $apiUrl;
+    global $apiUrl, $errorLogPath;
     $url = "$apiUrl/$method";
 
+    // Важное исправление: правильно кодируем reply_markup как JSON
     if (isset($params['reply_markup']) && is_array($params['reply_markup'])) {
-        $params['reply_markup'] = json_encode($params['reply_markup']);
+        $params['reply_markup'] = json_encode($params['reply_markup'], 
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     $ch = curl_init();
@@ -162,7 +154,7 @@ function apiRequest($method, $params = [], $retries = 3) {
         CURLOPT_POSTFIELDS => $params,
         CURLOPT_TIMEOUT => 10,
         CURLOPT_CONNECTTIMEOUT => 5,
-        CURLOPT_SSL_VERIFYPEER => true, // Recommended for production
+        CURLOPT_SSL_VERIFYPEER => true,
     ];
     curl_setopt_array($ch, $curlOptions);
 
@@ -172,9 +164,9 @@ function apiRequest($method, $params = [], $retries = 3) {
         $curlError = curl_error($ch);
 
         if ($response === false) {
-            bot_log("API Error ($method): cURL Error: $curlError. HTTP Code: $httpCode. URL: $url. Params: " . json_encode($params), "ERROR");
+            file_put_contents($errorLogPath, "[".date('Y-m-d H:i:s')."] API Error ($method): cURL Error: $curlError. HTTP Code: $httpCode\n", FILE_APPEND);
             if ($i < $retries - 1) {
-                sleep(1 + $i); // Exponential backoff
+                sleep(1 + $i);
                 continue;
             }
             curl_close($ch);
@@ -187,14 +179,14 @@ function apiRequest($method, $params = [], $retries = 3) {
             return $result;
         }
 
-        bot_log("API Error ($method): HTTP $httpCode - Response: $response. URL: $url. Params: " . json_encode($params), "ERROR");
-        if ($httpCode >= 500 && $i < $retries - 1) { // Retry on server errors
+        file_put_contents($errorLogPath, "[".date('Y-m-d H:i:s')."] API Error ($method): HTTP $httpCode - Response: $response\n", FILE_APPEND);
+        if ($httpCode >= 500 && $i < $retries - 1) {
             sleep(1 + $i); 
             continue;
         }
         
         curl_close($ch);
-        return $result; // Return API error response for handling
+        return $result;
     }
     return false; 
 }
@@ -231,7 +223,7 @@ function editMessage($chatId, $msgId, $text, $keyboard = null) {
 
 function answerCallbackQuery($callbackQueryId, $text = null, $showAlert = false) {
     $params = ['callback_query_id' => $callbackQueryId];
-    if ($text !== null) { // Allow empty string for text
+    if ($text !== null) {
         $params['text'] = $text;
     }
     $params['show_alert'] = $showAlert;
@@ -241,29 +233,25 @@ function answerCallbackQuery($callbackQueryId, $text = null, $showAlert = false)
 function isSubscribed($userId) {
     global $botToken, $channelId;
     if (empty($channelId)) {
-        bot_log("Channel ID not configured. Subscription check skipped for user $userId.", "WARNING");
-        return true; // Skip check if channel ID is not set
+        return true;
     }
     
     $url = "https://api.telegram.org/bot$botToken/getChatMember?chat_id=" . $channelId . "&user_id=$userId";
-
     $response = @file_get_contents($url); 
     if ($response === false) {
-        bot_log("isSubscribed: Failed to fetch from $url. User: $userId, Channel: $channelId", "ERROR");
+        bot_log("isSubscribed: Failed to fetch from $url. User: $userId", "ERROR");
         return false;
     }
     $data = json_decode($response, true);
 
     if (!isset($data['ok']) || $data['ok'] === false) {
-        bot_log("isSubscribed: API error for user $userId, channel $channelId. Response: " . $response, "ERROR");
-        // Specific error messages from Telegram can be useful here
         if (isset($data['description'])) {
-            bot_log("Telegram API error description: " . $data['description'], "ERROR");
-            if (strpos($data['description'], "not found") !== false || strpos($data['description'], "kicked") !== false) {
-                 return false; // User definitely not in channel
+            if (strpos($data['description'], "not found") !== false || 
+                strpos($data['description'], "kicked") !== false) {
+                return false;
             }
         }
-        return false; // Default to not subscribed on API error
+        return false;
     }
     return isset($data['result']['status']) && in_array($data['result']['status'], ['member', 'administrator', 'creator']);
 }
@@ -276,16 +264,14 @@ function getSubscriptionKeyboard() {
     if (empty($channelId)) return null;
 
     $channelUrl = '';
-    if (strpos((string)$channelId, "-100") === 0) { // Private channel/supergroup
+    if (strpos((string)$channelId, "-100") === 0) {
         $channelIdForLink = substr((string)$channelId, 4);
         $channelUrl = 'https://t.me/c/' . $channelIdForLink;
-    } elseif ($channelId[0] === '@') { // Public channel username
+    } elseif ($channelId[0] === '@') {
         $channelUrl = 'https://t.me/' . ltrim($channelId, '@');
     } else {
-        // Potentially a public channel ID, linking directly might not work well.
-        // Or an invalid ID. For simplicity, we assume private or username.
         bot_log("Cannot generate channel URL for Channel ID: $channelId", "WARNING");
-        return null; // Or provide a generic message without URL
+        return null;
     }
 
     return [
@@ -330,7 +316,7 @@ function getAdminPanelKeyboard() {
 }
 
 function getBackToAdminPanelKeyboard() {
-     return ['inline_keyboard' => [[['text' => '⬅️ Назад в админ-панель', 'callback_data' => 'admin_panel_show']]]];
+    return ['inline_keyboard' => [[['text' => '⬅️ Назад в админ-панель', 'callback_data' => 'admin_panel_show']]]];
 }
 
 function getWithdrawKeyboard($targetUserId) { 
@@ -475,12 +461,10 @@ function handleCallback($callbackQuery) {
     $data = $callbackQuery['data'];
     $userIsAdmin = ($userId == $adminId);
 
-    // Always try to answer callback query to remove loading state from button
-    // We will call it specifically in each branch or at the end.
-    // For now, let's make sure it's called if a specific handler doesn't.
+    // Всегда отвечаем на callback_query, чтобы убрать загрузку с кнопки
     $callbackAnswered = false;
 
-
+    // Проверка подписки
     if ($data === 'check_subscription') {
         if (!empty($channelId) && isSubscribed($userId)) {
             $userStmt = $db->prepare("SELECT ref_code FROM users WHERE user_id = :user_id");
@@ -490,18 +474,22 @@ function handleCallback($callbackQuery) {
             $message = "✅ Спасибо за подписку!\n\nТеперь вы можете пользоваться всеми функциями бота.\n\nВаша реферальная ссылка для приглашения друзей:\n<code>$refLink</code>\n\n";
             $message .= "👇 Вот главное меню:";
             editMessage($chatId, $msgId, $message, getMainMenuInlineKeyboard($userIsAdmin));
+            answerCallbackQuery($callbackQueryId);
+            $callbackAnswered = true;
         } else if (empty($channelId)) {
-             $message = "✅ Проверка подписки не требуется, так как канал не настроен.\n\n";
-             $message .= "👇 Вот главное меню:";
-             editMessage($chatId, $msgId, $message, getMainMenuInlineKeyboard($userIsAdmin));
-        }else {
+            $message = "✅ Проверка подписки не требуется, так как канал не настроен.\n\n";
+            $message .= "👇 Вот главное меню:";
+            editMessage($chatId, $msgId, $message, getMainMenuInlineKeyboard($userIsAdmin));
+            answerCallbackQuery($callbackQueryId);
+            $callbackAnswered = true;
+        } else {
             answerCallbackQuery($callbackQueryId, "❌ Вы всё ещё не подписаны. Пожалуйста, подпишитесь и нажмите кнопку ещё раз.", true);
             $callbackAnswered = true;
         }
-        if (!$callbackAnswered) answerCallbackQuery($callbackQueryId);
         return;
     }
     
+    // Проверка подписки для всех других действий
     if (!$userIsAdmin && !empty($channelId) && !isSubscribed($userId)) {
         $text = "Пожалуйста, подпишитесь на наш канал, чтобы продолжить.";
         $subKeyboard = getSubscriptionKeyboard();
@@ -525,7 +513,8 @@ function handleCallback($callbackQuery) {
         $message .= "👥 Приглашайте друзей: <code>$refLink</code>\n\n";
         $message .= "👇 Используйте кнопки ниже:";
         editMessage($chatId, $msgId, $message, getMainMenuInlineKeyboard($userIsAdmin));
-        answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+        answerCallbackQuery($callbackQueryId);
+        $callbackAnswered = true;
     }
 
     else if ($data === 'earn_money') {
@@ -536,7 +525,8 @@ function handleCallback($callbackQuery) {
         $remaining = $cooldown - (time() - ($row['last_earn'] ?? 0));
 
         if ($remaining > 0) {
-            answerCallbackQuery($callbackQueryId, "⏳ Подождите $remaining секунд перед следующим заработком!", true); $callbackAnswered = true;
+            answerCallbackQuery($callbackQueryId, "⏳ Подождите $remaining секунд перед следующим заработком!", true);
+            $callbackAnswered = true;
         } else {
             $earnedAmount = 10;
             $updateStmt = $db->prepare("UPDATE users SET balance = balance + :amount, last_earn = :time WHERE user_id = :user_id");
@@ -545,7 +535,8 @@ function handleCallback($callbackQuery) {
             $updateStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
             $updateStmt->execute();
             $newBalance = ($row['balance'] ?? 0) + $earnedAmount;
-            answerCallbackQuery($callbackQueryId, "✅ +$earnedAmount баллов! Ваш баланс: $newBalance", false); $callbackAnswered = true;
+            answerCallbackQuery($callbackQueryId, "✅ +$earnedAmount баллов! Ваш баланс: $newBalance", false);
+            $callbackAnswered = true;
         }
     }
 
@@ -553,15 +544,17 @@ function handleCallback($callbackQuery) {
         $stmt = $db->prepare("SELECT balance FROM users WHERE user_id = :user_id");
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $balance = $stmt->execute()->fetchArray(SQLITE3_ASSOC)['balance'] ?? 0;
-        answerCallbackQuery($callbackQueryId, "💳 Ваш текущий баланс: " . $balance . " баллов.", false); $callbackAnswered = true;
+        answerCallbackQuery($callbackQueryId, "💳 Ваш текущий баланс: " . $balance . " баллов.", false);
+        $callbackAnswered = true;
     }
 
     else if ($data === 'show_top_users') {
         editMessage($chatId, $msgId, getBotStatsText(), getBackToMainMenuKeyboard());
-        answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+        answerCallbackQuery($callbackQueryId);
+        $callbackAnswered = true;
     }
 
-    else if ($data === 'show_referrals_info') {
+       else if ($data === 'show_referrals_info') {
         $stmt = $db->prepare("SELECT ref_code, referrals FROM users WHERE user_id = :user_id");
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $user = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
@@ -572,7 +565,8 @@ function handleCallback($callbackQuery) {
         $msg .= "Ваша ссылка для приглашений:\n<code>$refLink</code>\n\n";
         $msg .= "💰 Вы получаете <b>50 баллов</b> за каждого друга!";
         editMessage($chatId, $msgId, $msg, getBackToMainMenuKeyboard());
-        answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+        answerCallbackQuery($callbackQueryId);
+        $callbackAnswered = true;
     }
 
     else if ($data === 'initiate_withdraw') {
@@ -584,7 +578,8 @@ function handleCallback($callbackQuery) {
 
         if ($balance < $minWithdraw) {
             $needed = $minWithdraw - $balance;
-            answerCallbackQuery($callbackQueryId, "❌ Мин. сумма: $minWithdraw баллов. Вам не хватает: $needed.", true); $callbackAnswered = true;
+            answerCallbackQuery($callbackQueryId, "❌ Мин. сумма: $minWithdraw баллов. Вам не хватает: $needed.", true);
+            $callbackAnswered = true;
         } else {
             $userFrom = $callbackQuery['from'];
             $usernameFrom = isset($userFrom['username']) ? "@".htmlspecialchars($userFrom['username']) : "ID: ".$userId;
@@ -596,9 +591,8 @@ function handleCallback($callbackQuery) {
 
             sendMessage($adminId, $adminMsg, getWithdrawKeyboard($userId));
             $userConfirmationMsg = "✅ Ваш запрос на вывод $balance баллов отправлен администратору. Ожидайте.";
-            // Не редактируем сообщение, а отвечаем через answerCallbackQuery и, возможно, отправляем новое с главным меню
-            answerCallbackQuery($callbackQueryId, $userConfirmationMsg, false); $callbackAnswered = true;
-            // sendMessage($chatId, $userConfirmationMsg . "\n\n👇 Выберите следующее действие:", getMainMenuInlineKeyboard($userIsAdmin));
+            answerCallbackQuery($callbackQueryId, $userConfirmationMsg, false);
+            $callbackAnswered = true;
         }
     }
 
@@ -613,18 +607,21 @@ function handleCallback($callbackQuery) {
         if (!empty($channelId)) $msg .= "📢 Не забудьте быть подписанным на наш основной канал!\n\n";
         $msg .= "При возникновении проблем обращайтесь к администрации.";
         editMessage($chatId, $msgId, $msg, getBackToMainMenuKeyboard());
-        answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+        answerCallbackQuery($callbackQueryId);
+        $callbackAnswered = true;
     }
 
     // --- Admin Panel Callbacks ---
     else if ($userIsAdmin) { // Group all admin actions here
         if ($data === 'admin_panel_show') {
             editMessage($chatId, $msgId, "⚙️ <b>Админ-панель</b>\nВыберите действие:", getAdminPanelKeyboard());
-            answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+            answerCallbackQuery($callbackQueryId);
+            $callbackAnswered = true;
         }
         else if ($data === 'admin_stats_show') {
             editMessage($chatId, $msgId, getBotStatsText(), getBackToAdminPanelKeyboard());
-            answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+            answerCallbackQuery($callbackQueryId);
+            $callbackAnswered = true;
         }
         else if ($data === 'admin_users_list') {
             $result = $db->query("SELECT user_id, username, balance, blocked FROM users ORDER BY joined_at DESC LIMIT 20"); 
@@ -646,7 +643,8 @@ function handleCallback($callbackQuery) {
 
             $usersKeyboard['inline_keyboard'][] = [['text' => '⬅️ Назад в админ-панель', 'callback_data' => 'admin_panel_show']];
             editMessage($chatId, $msgId, $userListText, $usersKeyboard);
-            answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
+            answerCallbackQuery($callbackQueryId);
+            $callbackAnswered = true;
         }
         else if (strpos($data, 'admin_user_details_') === 0) {
             $targetUserId = (int)str_replace('admin_user_details_', '', $data);
@@ -668,10 +666,12 @@ function handleCallback($callbackQuery) {
                 $message .= "Последний заработок: " . ($user['last_earn'] ? date('Y-m-d H:i:s', $user['last_earn']) : "<i>не было</i>") . "\n";
 
                 editMessage($chatId, $msgId, $message, getUserActionsKeyboard($targetUserId, $user['blocked']));
+                answerCallbackQuery($callbackQueryId);
+                $callbackAnswered = true;
             } else {
-                answerCallbackQuery($callbackQueryId, "Пользователь не найден.", true); $callbackAnswered = true;
+                answerCallbackQuery($callbackQueryId, "Пользователь не найден.", true);
+                $callbackAnswered = true;
             }
-            if (!$callbackAnswered) answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
         }
         else if (strpos($data, 'approve_withdraw_') === 0) {
             $targetUserId = (int)str_replace('approve_withdraw_', '', $data);
@@ -688,10 +688,13 @@ function handleCallback($callbackQuery) {
                 $adminConfirmationMsg = "✅ Заявка на вывод для ID $targetUserId (" . ($user['username'] ? "@".htmlspecialchars($user['username']) : '') . ") на $amount баллов ОДОБРЕНА.\nБаланс обнулен.";
                 editMessage($chatId, $msgId, $adminConfirmationMsg); 
                 sendMessage($targetUserId, "🎉 Ваша заявка на вывод $amount баллов ОДОБРЕНА!");
+                answerCallbackQuery($callbackQueryId);
+                $callbackAnswered = true;
             } else {
                 editMessage($chatId, $msgId, "❌ Ошибка: Пользователь $targetUserId для одобрения не найден.");
+                answerCallbackQuery($callbackQueryId);
+                $callbackAnswered = true;
             }
-            answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
         }
         else if (strpos($data, 'reject_withdraw_') === 0) {
             $targetUserId = (int)str_replace('reject_withdraw_', '', $data);
@@ -704,10 +707,13 @@ function handleCallback($callbackQuery) {
                 $adminConfirmationMsg = "❌ Заявка на вывод для ID $targetUserId (" . ($user['username'] ? "@".htmlspecialchars($user['username']) : '') . ") на $amount баллов ОТКЛОНЕНА.\nБаланс НЕ изменен.";
                 editMessage($chatId, $msgId, $adminConfirmationMsg); 
                 sendMessage($targetUserId, "⚠️ Ваша заявка на вывод $amount баллов ОТКЛОНЕНА. Средства на балансе.");
+                answerCallbackQuery($callbackQueryId);
+                $callbackAnswered = true;
             } else {
                 editMessage($chatId, $msgId, "❌ Ошибка: Пользователь $targetUserId для отклонения не найден.");
+                answerCallbackQuery($callbackQueryId);
+                $callbackAnswered = true;
             }
-            answerCallbackQuery($callbackQueryId); $callbackAnswered = true;
         }
         else if (strpos($data, 'block_user_') === 0) {
             $targetUserId = (int)str_replace('block_user_', '', $data);
@@ -716,19 +722,26 @@ function handleCallback($callbackQuery) {
                 $stmt->bindValue(':user_id', $targetUserId, SQLITE3_INTEGER);
                 $stmt->execute();
                 sendMessage($targetUserId, "🚫 Администратор заблокировал ваш доступ к боту.");
-                answerCallbackQuery($callbackQueryId, "✅ Пользователь ID $targetUserId заблокирован.", false); $callbackAnswered = true;
-                 // To refresh admin view:
+                answerCallbackQuery($callbackQueryId, "✅ Пользователь ID $targetUserId заблокирован.", false);
+                $callbackAnswered = true;
+                
+                // Обновляем информацию в админ-панели
                 $userStmt = $db->prepare("SELECT * FROM users WHERE user_id = :user_id");
                 $userStmt->bindValue(':user_id', $targetUserId, SQLITE3_INTEGER);
                 $updatedUser = $userStmt->execute()->fetchArray(SQLITE3_ASSOC);
                 if ($updatedUser) {
-                     $message = "👤 <b>Профиль пользователя (обновлено)</b>\n";
-                     $message .= "ID: <b>{$updatedUser['user_id']}</b> ... Статус: 🚫 <b>Заблокирован</b>"; // Сокращенно для примера
-                     // Полное обновление сообщения с актуальной клавиатурой
-                     // editMessage($chatId, $msgId, $полный_текст_профиля, getUserActionsKeyboard($targetUserId, true));
+                    $message = "👤 <b>Профиль пользователя</b>\n";
+                    $message .= "ID: <b>{$updatedUser['user_id']}</b>\n";
+                    $message .= "Username: " . ($updatedUser['username'] ? htmlspecialchars("@{$updatedUser['username']}") : "<i>не указан</i>") . "\n";
+                    $message .= "Баланс: <b>{$updatedUser['balance']}</b> баллов\n";
+                    $message .= "Рефералов: <b>{$updatedUser['referrals']}</b>\n";
+                    $message .= "Статус: 🚫 <b>Заблокирован</b>\n";
+                    
+                    editMessage($chatId, $msgId, $message, getUserActionsKeyboard($targetUserId, true));
                 }
             } else {
-                answerCallbackQuery($callbackQueryId, "⛔ Нельзя заблокировать самого себя.", true); $callbackAnswered = true;
+                answerCallbackQuery($callbackQueryId, "⛔ Нельзя заблокировать самого себя.", true);
+                $callbackAnswered = true;
             }
         }
         else if (strpos($data, 'unblock_user_') === 0) {
@@ -737,27 +750,41 @@ function handleCallback($callbackQuery) {
             $stmt->bindValue(':user_id', $targetUserId, SQLITE3_INTEGER);
             $stmt->execute();
             sendMessage($targetUserId, "🎉 Ваш доступ к боту восстановлен!");
-            answerCallbackQuery($callbackQueryId, "✅ Пользователь ID $targetUserId разблокирован.", false); $callbackAnswered = true;
-            // Optionally refresh admin view
+            answerCallbackQuery($callbackQueryId, "✅ Пользователь ID $targetUserId разблокирован.", false);
+            $callbackAnswered = true;
+            
+            // Обновляем информацию в админ-панели
+            $userStmt = $db->prepare("SELECT * FROM users WHERE user_id = :user_id");
+            $userStmt->bindValue(':user_id', $targetUserId, SQLITE3_INTEGER);
+            $updatedUser = $userStmt->execute()->fetchArray(SQLITE3_ASSOC);
+            if ($updatedUser) {
+                $message = "👤 <b>Профиль пользователя</b>\n";
+                $message .= "ID: <b>{$updatedUser['user_id']}</b>\n";
+                $message .= "Username: " . ($updatedUser['username'] ? htmlspecialchars("@{$updatedUser['username']}") : "<i>не указан</i>") . "\n";
+                $message .= "Баланс: <b>{$updatedUser['balance']}</b> баллов\n";
+                $message .= "Рефералов: <b>{$updatedUser['referrals']}</b>\n";
+                $message .= "Статус: ✅ <b>Активен</b>\n";
+                
+                editMessage($chatId, $msgId, $message, getUserActionsKeyboard($targetUserId, false));
+            }
         }
     } else if (!$userIsAdmin && 
-               (strpos($data, 'admin_') === 0 || 
-                strpos($data, 'approve_') === 0 || 
-                strpos($data, 'reject_') === 0 || 
-                strpos($data, 'block_') === 0 || 
-                strpos($data, 'unblock_') === 0)
-              ) {
-        answerCallbackQuery($callbackQueryId, "⛔ У вас нет доступа к этой функции.", true); $callbackAnswered = true;
+              (strpos($data, 'admin_') === 0 || 
+               strpos($data, 'approve_') === 0 || 
+               strpos($data, 'reject_') === 0 || 
+               strpos($data, 'block_') === 0 || 
+               strpos($data, 'unblock_') === 0)
+             ) {
+        answerCallbackQuery($callbackQueryId, "⛔ У вас нет доступа к этой функции.", true);
+        $callbackAnswered = true;
     }
 
-
-    // Fallback if no specific callback handled it and answerCallbackQuery was not called
+    // Fallback для необработанных callback-запросов
     if (!$callbackAnswered) {
         bot_log("Unhandled callback_data: $data by user $userId", "WARNING");
         answerCallbackQuery($callbackQueryId, "Неизвестная команда или действие.", true);
     }
 }
-
 
 // -----------------------------
 // 🚀 Main Webhook Logic
@@ -771,8 +798,6 @@ if (!$update) {
     exit;
 }
 
-bot_log("Received update: " . json_encode($update), "DEBUG"); 
-
 try {
     $message_thread_id = $update['message']['message_thread_id'] ?? ($update['callback_query']['message']['message_thread_id'] ?? null);
 
@@ -780,6 +805,7 @@ try {
         $userId = $update['callback_query']['from']['id'];
         $username = $update['callback_query']['from']['username'] ?? null;
         
+        // Проверяем, существует ли пользователь в базе
         $stmt = $db->prepare("SELECT 1 FROM users WHERE user_id = :user_id");
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         if (!$stmt->execute()->fetchArray(SQLITE3_ASSOC)) {
@@ -792,6 +818,8 @@ try {
                 bot_log("Failed to insert user $userId ($username) on callback. DB Error: " . $db->lastErrorMsg(), "ERROR");
             }
         }
+        
+        // Обрабатываем callback-запрос
         handleCallback($update['callback_query']);
 
     } elseif (isset($update['message'])) {
@@ -805,6 +833,7 @@ try {
             exit;
         }
 
+        // Проверяем, существует ли пользователь в базе
         $stmt = $db->prepare("SELECT 1 FROM users WHERE user_id = :user_id");
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         if (!$stmt->execute()->fetchArray(SQLITE3_ASSOC)) {
@@ -816,12 +845,13 @@ try {
             $insertStmt->bindValue(':username', $username ? substr($username, 0, 255) : null, SQLITE3_TEXT);
             $insertStmt->bindValue(':ref_code', $refCode, SQLITE3_TEXT);
             if(!$insertStmt->execute()) {
-                 bot_log("Failed to insert new user $userId ($username). DB Error: " . $db->lastErrorMsg(), "ERROR");
+                bot_log("Failed to insert new user $userId ($username). DB Error: " . $db->lastErrorMsg(), "ERROR");
             } else {
-                 bot_log("New user $userId ($username) initialized with ref_code $refCode.", "INFO");
+                bot_log("New user $userId ($username) initialized with ref_code $refCode.", "INFO");
             }
         }
 
+        // Проверяем, не заблокирован ли пользователь
         $userBlockedStmt = $db->prepare("SELECT blocked FROM users WHERE user_id = :user_id");
         $userBlockedStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $userStatus = $userBlockedStmt->execute()->fetchArray(SQLITE3_ASSOC);
@@ -832,6 +862,7 @@ try {
             exit;
         }
 
+        // Обрабатываем текстовые команды
         $text = trim($message['text'] ?? '');
         if (strpos($text, '/start') === 0) {
             handleStart($chatId, $userId, $text);
@@ -840,25 +871,23 @@ try {
             $is_subscribed = empty($channelId) || isSubscribed($userId);
 
             if ($is_subscribed || $userIsAdmin) {
-                 sendMessage($chatId, "Пожалуйста, используйте кнопки меню. Если меню не видно, используйте команду /start.", getMainMenuInlineKeyboard($userIsAdmin), $message_thread_id);
+                sendMessage($chatId, "Пожалуйста, используйте кнопки меню. Если меню не видно, используйте команду /start.", getMainMenuInlineKeyboard($userIsAdmin), $message_thread_id);
             } else {
-                 $subKeyboard = getSubscriptionKeyboard();
-                 $subMessage = "Привет! Пожалуйста, подпишитесь на наш канал для доступа к боту.";
-                 if ($subKeyboard) {
+                $subKeyboard = getSubscriptionKeyboard();
+                $subMessage = "Привет! Пожалуйста, подпишитесь на наш канал для доступа к боту.";
+                if ($subKeyboard) {
                     sendMessage($chatId, $subMessage, $subKeyboard, $message_thread_id);
-                 } else {
+                } else {
                     sendMessage($chatId, $subMessage . "\nНе удалось сформировать ссылку на канал. Пожалуйста, начните с команды /start или обратитесь к администратору.", null, $message_thread_id);
-                 }
+                }
             }
         }
     }
-} catch (Throwable $e) { // Catch all throwables (PHP 7+)
+} catch (Throwable $e) {
     bot_log("!!! Uncaught Throwable: ".$e->getMessage()." in ".$e->getFile().":".$e->getLine()."\nStack trace:\n".$e->getTraceAsString(), "FATAL");
-    // Avoid sending HTTP 500 to Telegram if possible, as it might cause retries.
-    // Telegram expects a 200 OK.
 }
 
-// Always respond with OK to Telegram to acknowledge receipt of the update
+// Всегда отвечаем OK для Telegram
 http_response_code(200);
 echo "OK"; 
 ?>
