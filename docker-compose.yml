@@ -9,4 +9,6 @@ services:
       - .:/var/www/html
       - /tmp:/tmp
     environment:
-      - APACHE_DOCUMENT_ROOT=/var/www/html
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - ADMIN_ID=${ADMIN_ID}
+      - BOT_USERNAME=${BOT_USERNAME}
