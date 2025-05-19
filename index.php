@@ -15,7 +15,7 @@ ini_set('error_log', '/tmp/error.log');
 
 // Константы
 define('DB_FILE', '/tmp/bot_database.db');
-define('CHANNEL_ID', -1002543728373); // Ваш приватный канал
+define('CHANNEL_ID', -1002543728373); // Замените на ваш реальный канал
 define('WEBHOOK_URL', 'https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
 
 // Переменные окружения
@@ -165,6 +165,7 @@ function getAdminKeyboard() {
     return ['inline_keyboard' => [
         [['text' => '📊 Статистика', 'callback_data' => 'admin_stats']],
         [['text' => '👤 Участники', 'callback_data' => 'admin_users']],
+        [['text' => '✉️ Рассылка', 'callback_data' => 'admin_broadcast']],
         [['text' => '⬅️ Назад', 'callback_data' => 'admin_back']]
     ]];
 }
@@ -235,17 +236,19 @@ function getBotStats() {
 function handleStart($chatId, $text) {
     global $db, $botUsername, $adminId;
 
-    // Реферальная система
     $refCode = trim(str_replace('/start', '', $text));
+
     if ($refCode && !$db->querySingle("SELECT referred_by FROM users WHERE user_id=$chatId")) {
         $referrer = $db->querySingle("SELECT user_id FROM users WHERE ref_code='$refCode'");
         if ($referrer && $referrer != $chatId) {
-            $db->exec("UPDATE users SET referrals=referrals+1, balance=balance+50 WHERE user_id={$referrer}");
+            $db->exec("UPDATE users SET 
+                referrals=referrals+1, 
+                balance=balance+50 
+                WHERE user_id={$referrer}");
             sendMessage($referrer, "🎉 Новый реферал! +50 баллов.");
         }
     }
 
-    // Проверка подписки
     if (!isSubscribed($chatId)) {
         $message = "👋 Добро пожаловать!\n";
         $message .= "📢 Подпишитесь на наш канал, чтобы продолжить:";
@@ -253,14 +256,13 @@ function handleStart($chatId, $text) {
         return;
     }
 
-    // Основное меню
     $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
     $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
 
     $message = "👋 Добро пожаловать в @{$botUsername}!\n";
     $message .= "💰 Зарабатывайте баллы и выводите их\n";
     $message .= "👥 Приглашайте друзей по реферальной ссылке:\n<code>$refLink</code>";
-    sendMessage($chatId, $message, getMainKeyboard($chatId == $GLOBALS['adminId']));
+    sendMessage($chatId, $message, getMainKeyboard($chatId == $adminId));
 }
 
 function handleCallback($callbackQuery) {
@@ -289,7 +291,11 @@ function handleCallback($callbackQuery) {
             $amount = $user['balance'];
             $db->exec("UPDATE users SET balance=0 WHERE user_id=$userId");
             
-            editMessage($chatId, $msgId, "✅ Заявка одобрена\nСумма: $amount баллов\nПользователь: $userId");
+            $adminMsg = "✅ Заявка одобрена\n";
+            $adminMsg .= "Сумма: $amount баллов\n";
+            $adminMsg .= "Пользователь: $userId";
+            
+            editMessage($chatId, $msgId, $adminMsg);
             sendMessage($userId, "🎉 Ваша заявка на вывод $amount баллов одобрена!");
         }
     }
@@ -300,7 +306,13 @@ function handleCallback($callbackQuery) {
         
         if ($chatId == $adminId && $user) {
             $amount = $user['balance'];
-            editMessage($chatId, $msgId, "❌ Заявка отклонена\nСумма: $amount баллов\nПользователь: $userId");
+            $db->exec("UPDATE users SET balance=balance WHERE user_id=$userId");
+            
+            $adminMsg = "❌ Заявка отклонена\n";
+            $adminMsg .= "Сумма: $amount баллов\n";
+            $adminMsg .= "Пользователь: $userId";
+            
+            editMessage($chatId, $msgId, $adminMsg);
             sendMessage($userId, "⚠️ Ваша заявка на вывод $amount баллов отклонена. Средства возвращены.");
         }
     }
@@ -426,7 +438,6 @@ function handleCommand($chatId, $text) {
         case '👥 Рефералы':
             $user = $db->querySingle("SELECT * FROM users WHERE user_id=$chatId", true);
             $refLink = "https://t.me/ $botUsername?start={$user['ref_code']}";
-
             $msg = "👥 <b>Реферальная система</b>\n";
             $msg .= "Ваш код: <code>{$user['ref_code']}</code>\n";
             $msg .= "Приглашено: <b>{$user['referrals']}</b>\n";
@@ -477,9 +488,9 @@ try {
             $username = $message['from']['username'] ?? null;
             $refCode = substr(md5($chatId . time()), 0, 8);
             $db->exec("INSERT INTO users (
-                user_id, username, balance, referrals, ref_code, referred_by, blocked, last_earn
+                user_id, username, balance, referrals, ref_code, referred_by, subscribed, blocked, last_earn
             ) VALUES (
-                $chatId, '$username', 0, 0, '$refCode', NULL, 0, 0
+                $chatId, '$username', 0, 0, '$refCode', NULL, 0, 0, 0
             )");
         }
 
@@ -490,7 +501,6 @@ try {
             exit;
         }
 
-        // Команды
         $text = trim($message['text'] ?? '');
 
         if (strpos($text, '/start') === 0) {
