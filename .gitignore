@@ -1,0 +1,5 @@
+/config.php
+/users.json
+/error.log
+/request.log
+.env
