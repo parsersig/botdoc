@@ -1,13 +1,13 @@
-RewriteEngine On RewriteBase /
+# Enable URL rewriting
+RewriteEngine On
+RewriteBase /
 
-Route webhook requests to index.php
+# Route all requests to index.php (Telegram webhook endpoint)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^.*$ index.php [L]
 
-RewriteRule ^webhook$ index.php [L]
-
-Prevent direct access to sensitive files
-
-<FilesMatch ".(json|log)$"> Order Allow,Deny Deny from all
-
-Ensure PHP files are processed
-
-<FilesMatch ".php$"> SetHandler application/x-httpd-php
+# Deny direct access to sensitive files (JSON and log files)
+<FilesMatch "\.(json|log)$">
+    Require all denied
+</FilesMatch>
