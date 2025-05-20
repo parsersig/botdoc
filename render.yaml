@@ -14,3 +14,18 @@ services:
     numInstances: 1
     healthCheckPath: /
     port: 80
+    
+  - type: cron
+    name: botdoc-stats
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    schedule: "*/10 * * * *"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false # Укажите значение в панели Render.com
+      - key: ADMIN_ID
+        sync: false # Укажите значение в панели Render.com
+      - key: BOT_USERNAME
+        sync: false # Укажите значение в панели Render.com
+    command: cron
