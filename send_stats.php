@@ -1,9 +1,17 @@
 <?php
+// Настройка отображения ошибок
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 // Скрипт для автоматической отправки статистики бота
-require_once 'config.php'; // Подключаем конфигурацию бота
+require_once __DIR__ . '/config.php'; // Подключаем конфигурацию бота
 
 // Инициализация базы данных
-$db = new SQLite3($dbPath);
+$db = new SQLite3($dbPath ?? '/tmp/bot_database.db');
+
+// Логируем запуск
+file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Запуск скрипта отправки статистики\n", FILE_APPEND);
 
 // Функция для отправки запросов к API Telegram
 function apiRequest($method, $params = []) {
@@ -22,7 +30,7 @@ function apiRequest($method, $params = []) {
     curl_close($curl);
     
     if ($error) {
-        file_put_contents('bot_log.txt', date('Y-m-d H:i:s') . " - ERROR: $error\n", FILE_APPEND);
+        file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - ERROR: $error\n", FILE_APPEND);
         return false;
     }
     return json_decode($response, true);
@@ -94,6 +102,17 @@ function getBotStats() {
     return $message;
 }
 
+// Проверяем, существует ли таблица stat_channels
+$tableExists = $db->querySingle("SELECT name FROM sqlite_master WHERE type='table' AND name='stat_channels'");
+if (!$tableExists) {
+    $db->exec("CREATE TABLE IF NOT EXISTS stat_channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_id TEXT NOT NULL UNIQUE,
+        added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
+    file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Создана таблица stat_channels\n", FILE_APPEND);
+}
+
 // Получаем список каналов для отправки статистики
 $channelsQuery = $db->query("SELECT channel_id FROM stat_channels");
 $channels = [];
@@ -104,7 +123,12 @@ while ($row = $channelsQuery->fetchArray(SQLITE3_ASSOC)) {
 // Если нет каналов, отправляем статистику только админу
 if (empty($channels)) {
     global $adminId;
-    $channels = [$adminId];
+    if (!empty($adminId)) {
+        $channels = [$adminId];
+        file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Нет каналов, отправляем админу: $adminId\n", FILE_APPEND);
+    } else {
+        file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Нет каналов и не задан админ\n", FILE_APPEND);
+    }
 }
 
 // Получаем статистику
@@ -112,7 +136,13 @@ $statsMessage = getBotStats();
 
 // Отправляем статистику во все каналы/чаты
 foreach ($channels as $channelId) {
-    sendMessage($channelId, $statsMessage);
+    $result = sendMessage($channelId, $statsMessage);
+    // Логируем результат
+    if ($result) {
+        file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Статистика отправлена в канал $channelId\n", FILE_APPEND);
+    } else {
+        file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Ошибка отправки в канал $channelId\n", FILE_APPEND);
+    }
     // Небольшая задержка между отправками
     usleep(300000); // 0.3 секунды
 }
@@ -120,5 +150,6 @@ foreach ($channels as $channelId) {
 // Закрываем соединение с БД
 $db->close();
 
+file_put_contents('/tmp/cron_log.txt', date('Y-m-d H:i:s') . " - Скрипт отправки статистики завершен\n", FILE_APPEND);
 echo "Статистика успешно отправлена в " . count($channels) . " каналов/чатов.";
 ?>
