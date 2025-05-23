@@ -3,11 +3,6 @@
     Deny from all
 </Files>
 
-<Files "users.json">
-    Order Allow,Deny
-    Deny from all
-</Files>
-
 <Files "error.log">
     Order Allow,Deny
     Deny from all

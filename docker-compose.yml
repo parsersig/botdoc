@@ -1,5 +1,8 @@
 version: '3.8'
 
+volumes:
+  bot_db_data:
+
 services:
   web:
     build: .
@@ -7,8 +10,11 @@ services:
       - "8080:80"
     volumes:
       - .:/var/www/html
-      - /tmp:/tmp
+      - bot_db_data:/app/data
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - ADMIN_ID=${ADMIN_ID}
       - BOT_USERNAME=${BOT_USERNAME}
+      - DB_FILE_PATH=/app/data/bot_database.db
+      - ADMIN_SECRET_TOKEN=YOUR_STRONG_DEFAULT_TOKEN_PLEASE_CHANGE_ME # Recommend user to change this.
+      - CRON_SCHEDULE=0 */6 * * * # Default: every 6 hours

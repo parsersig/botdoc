@@ -14,23 +14,38 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /var/www/html
 COPY . .
 
-# Права для базы и /tmp
-RUN chmod -R 777 /tmp && \
-    touch /tmp/bot_database.db && \
-    chmod 777 /tmp/bot_database.db && \
-    chmod +x /var/www/html/send_stats.php
+# Create data directory and set permissions
+RUN mkdir -p /app/data && chown www-data:www-data /app/data
+
+# Make send_stats.php executable
+RUN chmod +x /var/www/html/send_stats.php
+
+# Create and set permissions for cron log file
+RUN touch /var/log/cron.log && chmod 0666 /var/log/cron.log
 
 # Подавление предупреждения ServerName
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
 # Создание стартового скрипта для поддержки веб-сервера и cron-задач
 RUN echo '#!/bin/bash\n\
-if [ "$1" = "cron" ]; then\n\
-  php /var/www/html/send_stats.php\n\
-  exit $?\n\
-fi\n\
+# Default cron schedule if not set\n\
+DEFAULT_CRON_SCHEDULE="0 */6 * * *"\n\
+CRON_JOB_SCHEDULE=${CRON_SCHEDULE:-$DEFAULT_CRON_SCHEDULE}\n\
 \n\
-# Запуск Apache в foreground режиме\n\
+# Create cron job file\n\
+echo "${CRON_JOB_SCHEDULE} php /var/www/html/send_stats.php >> /var/log/cron.log 2>&1" > /etc/cron.d/bot_cron\n\
+# Add an empty line to the cron file, it'\''s sometimes required\n\
+echo "" >> /etc/cron.d/bot_cron\n\
+\n\
+# Give execution rights on the cron job file\n\
+chmod 0644 /etc/cron.d/bot_cron\n\
+# Apply cron job\n\
+crontab /etc/cron.d/bot_cron\n\
+\n\
+# Start cron daemon\n\
+cron\n\
+\n\
+# Start Apache in foreground\n\
 apache2-foreground\n\
 ' > /usr/local/bin/entrypoint.sh && \
     chmod +x /usr/local/bin/entrypoint.sh
