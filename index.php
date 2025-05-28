@@ -6,6 +6,13 @@
 
 require_once __DIR__ . '/bootstrap.php';
 
+// Health check endpoint (ping for Render uptime)
+if (isset($_SERVER['REQUEST_URI']) && $_SERVER['REQUEST_URI'] === '/ping') {
+    header('Content-Type: text/plain');
+    echo 'OK';
+    exit; // Завершаем выполнение, чтобы бот не обрабатывал запрос дальше
+}
+
 // Critical check for $botToken after including bootstrap.php
 if (empty($botToken)) {
     // bot_log is available from bootstrap.php
