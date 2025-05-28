@@ -606,17 +606,13 @@ function handleStart($chatId, $userId, $text) {
         $userReferralInfo = $userReferralInfoStmt->execute()->fetchArray(SQLITE3_ASSOC);
 
         if ($userReferralInfo && empty($userReferralInfo['referred_by'])) { 
+            // Только сохраняем, кто пригласил, но не начисляем бонус
             $referrerQuery = $db->prepare("SELECT user_id FROM users WHERE ref_code = :ref_code AND user_id != :user_id");
             $referrerQuery->bindValue(':ref_code', $refCode, SQLITE3_TEXT);
             $referrerQuery->bindValue(':user_id', $userId, SQLITE3_INTEGER);
             $referrer = $referrerQuery->execute()->fetchArray(SQLITE3_ASSOC);
 
             if ($referrer && $referrer['user_id'] != $userId) {
-                $updateReferrerStmt = $db->prepare("UPDATE users SET referrals = referrals + 1, balance = balance + 500 WHERE user_id = :referrer_id");
-                $updateReferrerStmt->bindValue(':referrer_id', $referrer['user_id'], SQLITE3_INTEGER);
-                $updateReferrerStmt->execute();
-                sendMessage($referrer['user_id'], "🎉 Новый реферал присоединился по вашей ссылке! <b>+500₽</b> на ваш счет.");
-                
                 $updateUserStmt = $db->prepare("UPDATE users SET referred_by = :referrer_id WHERE user_id = :user_id");
                 $updateUserStmt->bindValue(':referrer_id', $referrer['user_id'], SQLITE3_INTEGER);
                 $updateUserStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
@@ -661,6 +657,33 @@ function handleCallback($callbackQuery) {
 
     if ($data === 'check_subscription') {
         if (!empty($channelId) && $channelId !== '@' && isSubscribed($userId)) {
+            // --- Реферальная логика: начислять бонус только после подписки ---
+            $userReferralInfoStmt = $db->prepare("SELECT referred_by FROM users WHERE user_id = :user_id");
+            $userReferralInfoStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
+            $userReferralInfo = $userReferralInfoStmt->execute()->fetchArray(SQLITE3_ASSOC);
+            if ($userReferralInfo && empty($userReferralInfo['referred_by'])) {
+                // Найти реферера по ref_code из /start
+                $userStartStmt = $db->prepare("SELECT ref_code FROM users WHERE user_id = :user_id");
+                $userStartStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
+                $userStart = $userStartStmt->execute()->fetchArray(SQLITE3_ASSOC);
+                $refCode = $userStart['ref_code'] ?? '';
+                if (!empty($refCode)) {
+                    $referrerQuery = $db->prepare("SELECT user_id FROM users WHERE ref_code = :ref_code AND user_id != :user_id");
+                    $referrerQuery->bindValue(':ref_code', $refCode, SQLITE3_TEXT);
+                    $referrerQuery->bindValue(':user_id', $userId, SQLITE3_INTEGER);
+                    $referrer = $referrerQuery->execute()->fetchArray(SQLITE3_ASSOC);
+                    if ($referrer && $referrer['user_id'] != $userId) {
+                        $updateReferrerStmt = $db->prepare("UPDATE users SET referrals = referrals + 1, balance = balance + 500 WHERE user_id = :referrer_id");
+                        $updateReferrerStmt->bindValue(':referrer_id', $referrer['user_id'], SQLITE3_INTEGER);
+                        $updateReferrerStmt->execute();
+                        sendMessage($referrer['user_id'], "🎉 Новый реферал присоединился по вашей ссылке! <b>+500₽</b> на ваш счет.");
+                        $updateUserStmt = $db->prepare("UPDATE users SET referred_by = :referrer_id WHERE user_id = :user_id");
+                        $updateUserStmt->bindValue(':referrer_id', $referrer['user_id'], SQLITE3_INTEGER);
+                        $updateUserStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
+                        $updateUserStmt->execute();
+                    }
+                }
+            }
             $userStmt = $db->prepare("SELECT ref_code FROM users WHERE user_id = :user_id");
             $userStmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
             $user = $userStmt->execute()->fetchArray(SQLITE3_ASSOC);
@@ -838,7 +861,8 @@ function handleCallback($callbackQuery) {
             $position = 1;
             while ($user = $result->fetchArray(SQLITE3_ASSOC)) {
                 $emoji = ['🥇', '🥈', '🥉'][$position - 1] ?? '🏅';
-                $username = $user['username'] ? "@" . htmlspecialchars($user['username']) : "Пользователь";
+                // Только имя (username) или 'Пользователь', без ссылки и id
+                $username = $user['username'] ? htmlspecialchars($user['username']) : "Пользователь";
                 $message .= "{$emoji} {$position}. {$username}\n";
                 $message .= "💰 " . number_format($user['balance'], 0, ',', ' ') . "₽ | 👥 {$user['referrals']} реф.\n\n";
                 $position++;
