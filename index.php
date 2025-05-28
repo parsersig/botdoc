@@ -159,6 +159,30 @@ function sendMessage($chatId, $text, $keyboard = null, $message_thread_id = null
     return apiRequest('sendMessage', $params);
 }
 
+// --- Добавляем недостающие функции для совместимости и корректной работы ---
+function editMessage($chatId, $msgId, $text, $keyboard = null) {
+    $params = [
+        'chat_id' => $chatId,
+        'message_id' => $msgId,
+        'text' => $text,
+        'parse_mode' => 'HTML',
+        'disable_web_page_preview' => true
+    ];
+    if ($keyboard) {
+        $params['reply_markup'] = $keyboard;
+    }
+    return apiRequest('editMessageText', $params);
+}
+
+function answerCallbackQuery($callbackQueryId, $text = null, $showAlert = false) {
+    $params = ['callback_query_id' => $callbackQueryId];
+    if ($text !== null) {
+        $params['text'] = $text;
+    }
+    $params['show_alert'] = $showAlert;
+    return apiRequest('answerCallbackQuery', $params);
+}
+
 // ... existing editMessage and answerCallbackQuery functions ...
 
 // Enhanced investment creation with validation
